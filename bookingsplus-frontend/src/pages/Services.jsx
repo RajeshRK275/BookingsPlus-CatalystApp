@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Table } from '../ui/Table';
 import { Button } from '../ui/Button';
 import { Plus } from 'lucide-react';
+import { CreateServiceModal } from '../components/CreateServiceModal';
 
 const mockServices = [
     { id: 1, name: 'Initial Consultation', duration: 30, price: '$0.00', status: 'active' },
@@ -11,6 +12,7 @@ const mockServices = [
 
 const Services = () => {
     const [services] = useState(mockServices);
+    const [isModalOpen, setIsModalOpen] = useState(false);
 
     const columns = [
         { label: 'Service Name', key: 'name', sortable: true },
@@ -34,7 +36,7 @@ const Services = () => {
                     <h1 className="page-title">Services</h1>
                     <p className="page-subtitle">Manage your bookable services and pricing.</p>
                 </div>
-                <Button variant="primary">
+                <Button variant="primary" onClick={() => setIsModalOpen(true)}>
                     <Plus size={16} /> New Service
                 </Button>
             </div>
@@ -42,6 +44,11 @@ const Services = () => {
             <div className="card" style={{ padding: 0 }}>
                 <Table columns={columns} data={services} />
             </div>
+
+            <CreateServiceModal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+            />
         </div>
     );
 };
