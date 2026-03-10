@@ -9,7 +9,7 @@ const Topbar = () => {
         <header className="topbar">
             <div className="topbar-left" style={{ display: 'flex', alignItems: 'center', width: 'var(--pk-sidebar-width)' }}>
                 <CheckSquare className="brand-logo-icon" size={24} color="var(--pk-primary)" style={{ marginRight: '8px' }} />
-                <div className="brand-logo" style={{ margin: 0, color: 'var(--pk-text-main)' }}>Bookings</div>
+                <div className="brand-logo" style={{ margin: 0, color: 'var(--pk-text-main)' }}>Bookings+</div>
             </div>
             
             <div className="topbar-right" style={{ flex: 1, justifyContent: 'flex-end' }}>
