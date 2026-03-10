@@ -1,0 +1,8 @@
+{
+  "short_name": "BookingsPlus",
+  "name": "BookingsPlus Application",
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0b5fff",
+  "background_color": "#ffffff"
+}
