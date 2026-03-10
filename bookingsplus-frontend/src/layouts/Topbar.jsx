@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bell, Search, User, Settings } from 'lucide-react';
+import { Bell, Calendar, User, Settings } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const Topbar = () => {
