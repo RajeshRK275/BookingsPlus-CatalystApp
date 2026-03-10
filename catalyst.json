@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "targets": [
+      "bookingsplus"
+    ],
+    "ignore": [],
+    "source": "functions"
+  },
+  "client": {
+    "source": "bookingsplus-frontend",
+    "plugin": "zcatalyst-cli-plugin-react"
+  }
+}

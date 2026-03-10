@@ -1,0 +1,30 @@
+{
+  "defaults": {
+    "project": 1,
+    "env": 1
+  },
+  "actives": {
+    "project": 1,
+    "env": 1
+  },
+  "projects": [
+    {
+      "idx": 1,
+      "id": "29187000000022001",
+      "name": "BookingsPlus",
+      "domain": {
+        "id": "50039740848",
+        "name": "bookingsplus-60064902964.development"
+      },
+      "timezone": "Asia/Kolkata",
+      "env": [
+        {
+          "idx": 1,
+          "id": "60064902964",
+          "name": "Development",
+          "type": 3
+        }
+      ]
+    }
+  ]
+}
