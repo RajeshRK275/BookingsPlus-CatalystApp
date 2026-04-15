@@ -5,7 +5,12 @@ import MainLayout from './layouts/MainLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Services from './pages/Services';
+import ServiceDetail from './pages/ServiceDetail';
+import PublicBooking from './pages/PublicBooking';
 import Appointments from './pages/Appointments';
+import Calendar from './pages/Calendar';
+import Employees from './pages/Employees';
+import EmployeeDetail from './pages/EmployeeDetail';
 
 // Query Client for API caching
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -23,12 +28,16 @@ function App() {
                 <Router basename="/app">
                     <Routes>
                         <Route path="/login" element={<Login />} />
+                        <Route path="/services/:serviceId" element={<ServiceDetail />} />
+                        <Route path="/book/:serviceId" element={<PublicBooking />} />
                         
                         <Route element={<MainLayout />}>
                             <Route path="/" element={<Dashboard />} />
                             <Route path="/appointments" element={<Appointments />} />
+                            <Route path="/calendar" element={<Calendar />} />
                             <Route path="/services" element={<Services />} />
-                            <Route path="/staff" element={<div>Staff Page Placeholder</div>} />
+                            <Route path="/employees" element={<Employees />} />
+                            <Route path="/employees/:employeeId" element={<EmployeeDetail />} />
                             <Route path="/customers" element={<div>Customers Page Placeholder</div>} />
                         </Route>
                     </Routes>
@@ -39,3 +48,4 @@ function App() {
 }
 
 export default App;
+

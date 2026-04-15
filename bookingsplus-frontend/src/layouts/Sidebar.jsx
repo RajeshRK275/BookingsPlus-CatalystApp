@@ -6,7 +6,7 @@ const navItems = [
     { label: 'Dashboard', path: '/', icon: LayoutDashboard },
     { label: 'Appointments', path: '/appointments', icon: Calendar },
     { label: 'Services', path: '/services', icon: Grid },
-    { label: 'Staff', path: '/staff', icon: Briefcase },
+    { label: 'Employees', path: '/employees', icon: Briefcase },
     { label: 'Customers', path: '/customers', icon: Users },
     { label: 'Notifications', path: '/notifications', icon: Bell },
     { label: 'Settings', path: '/settings', icon: Settings },

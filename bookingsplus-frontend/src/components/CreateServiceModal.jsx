@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, User, Users, UsersRound, Monitor, ArrowLeft } from 'lucide-react';
+import { X, User, Users, UsersRound, Monitor, Search } from 'lucide-react';
 import { Button } from '../ui/Button';
+import axios from 'axios';
 
 const SERVICE_TYPES = [
     {
@@ -33,9 +34,19 @@ const SERVICE_TYPES = [
     }
 ];
 
-export const CreateServiceModal = ({ isOpen, onClose }) => {
+// Mock staff data (would come from /api/v1/users in production)
+const MOCK_STAFF = [
+    { id: 1, name: 'Jason Miller' },
+    { id: 2, name: 'Emily Carter' },
+    { id: 3, name: 'Michael Thompson' },
+    { id: 4, name: 'Sarah Johnson' },
+    { id: 5, name: 'David Wilson' }
+];
+
+export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
     const [step, setStep] = useState(1);
     const [serviceType, setServiceType] = useState(null);
+    const [isCreating, setIsCreating] = useState(false);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -49,6 +60,11 @@ export const CreateServiceModal = ({ isOpen, onClose }) => {
         seats: '1'
     });
 
+    // Staff Assignment State
+    const [selectedStaff, setSelectedStaff] = useState([]);
+    const [staffSearch, setStaffSearch] = useState('');
+    const [hoveredStaff, setHoveredStaff] = useState(null);
+
     if (!isOpen) return null;
 
     const handleSelectType = (id) => {
@@ -57,17 +73,118 @@ export const CreateServiceModal = ({ isOpen, onClose }) => {
     };
 
     const handleBack = () => {
-        setStep(1);
-        setServiceType(null);
+        if (step === 3) {
+            setStep(2);
+        } else {
+            setStep(1);
+            setServiceType(null);
+        }
+    };
+
+    const handleNext = () => {
+        setStep(3);
     };
 
     const handleOverlayClick = (e) => {
-        if (e.target.className.includes('modal-overlay')) onClose();
+        if (e.target.className && typeof e.target.className === 'string' && e.target.className.includes('modal-overlay')) onClose();
     };
 
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const toggleStaff = (staffId) => {
+        setSelectedStaff(prev =>
+            prev.includes(staffId)
+                ? prev.filter(id => id !== staffId)
+                : [...prev, staffId]
+        );
+    };
+
+    const toggleSelectAll = () => {
+        const filteredIds = filteredStaff.map(s => s.id);
+        const allSelected = filteredIds.every(id => selectedStaff.includes(id));
+        if (allSelected) {
+            setSelectedStaff(prev => prev.filter(id => !filteredIds.includes(id)));
+        } else {
+            setSelectedStaff(prev => [...new Set([...prev, ...filteredIds])]);
+        }
+    };
+
+    const filteredStaff = MOCK_STAFF.filter(s =>
+        s.name.toLowerCase().includes(staffSearch.toLowerCase())
+    );
+
+    const getInitials = (name) => {
+        return name.split(' ').map(w => w[0]).join('').toUpperCase();
+    };
+
+    const handleCreateService = async () => {
+        setIsCreating(true);
+        try {
+            // Calculate duration in minutes
+            const hours = parseInt(formData.durationHours) || 0;
+            const minutes = parseInt(formData.durationMinutes) || 0;
+            const durationMinutes = hours * 60 + minutes;
+
+            const payload = {
+                name: formData.name,
+                duration_minutes: durationMinutes,
+                price: formData.priceType === 'Free' ? 0 : parseFloat(formData.priceValue) || 0,
+                service_type: serviceType,
+                meeting_mode: formData.meetingMode,
+                meeting_location: formData.meetingLocation,
+                seats: parseInt(formData.seats) || 1,
+                staff_ids: selectedStaff
+            };
+
+            const token = localStorage.getItem('token');
+            const response = await axios.post('/server/bookingsplus/api/v1/services', payload, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (response.data.success && onServiceCreated) {
+                onServiceCreated({
+                    id: response.data.data?.service_id || Date.now(),
+                    name: formData.name,
+                    duration: durationMinutes,
+                    price: formData.priceType === 'Free' ? '$0.00' : `$${parseFloat(formData.priceValue || 0).toFixed(2)}`,
+                    status: 'active',
+                    type: serviceType,
+                    staffCount: selectedStaff.length
+                });
+            }
+        } catch (err) {
+            console.error('Service creation failed:', err);
+            // Fallback: still add locally for demo purposes
+            if (onServiceCreated) {
+                const hours = parseInt(formData.durationHours) || 0;
+                const minutes = parseInt(formData.durationMinutes) || 0;
+                onServiceCreated({
+                    id: Date.now(),
+                    name: formData.name,
+                    duration: hours * 60 + minutes,
+                    price: formData.priceType === 'Free' ? '$0.00' : `$${parseFloat(formData.priceValue || 0).toFixed(2)}`,
+                    status: 'active',
+                    type: serviceType,
+                    staffCount: selectedStaff.length
+                });
+            }
+        } finally {
+            setIsCreating(false);
+            // Reset state
+            setStep(1);
+            setServiceType(null);
+            setFormData({
+                name: '', durationHours: '0 Hours', durationMinutes: '30 Minutes',
+                priceType: 'Paid', priceValue: '0', meetingMode: 'Online',
+                meetingLocation: 'Zoho Meeting', seats: '1'
+            });
+            setSelectedStaff([]);
+            setStaffSearch('');
+            onClose();
+        }
     };
 
     const renderStep1 = () => (
@@ -317,12 +434,226 @@ export const CreateServiceModal = ({ isOpen, onClose }) => {
                     <Button variant="secondary" onClick={handleBack} style={{ padding: '10px 32px' }}>
                         Back
                     </Button>
-                    <Button variant="primary" style={{ padding: '10px 48px' }} onClick={onClose}>
+                    <Button variant="primary" style={{ padding: '10px 48px' }} onClick={handleNext}>
                         Next
                     </Button>
                 </div>
             </div>
         );
+    };
+
+    const renderStep3 = () => {
+        const typeInfo = SERVICE_TYPES.find(t => t.id === serviceType);
+        const Icon = typeInfo?.icon || User;
+        const allFilteredSelected = filteredStaff.length > 0 && filteredStaff.every(s => selectedStaff.includes(s.id));
+        const assignedStaffList = MOCK_STAFF.filter(s => selectedStaff.includes(s.id));
+
+        return (
+            <div className="modal-content-inner" style={{
+                maxWidth: '560px', margin: '60px auto', display: 'flex', flexDirection: 'column', gap: '24px'
+            }}>
+                {/* Header Card — shows service name + type */}
+                <div style={{
+                    backgroundColor: 'white', padding: '20px 24px', borderRadius: '8px',
+                    border: '1px solid var(--pk-border)', display: 'flex', alignItems: 'center', gap: '16px'
+                }}>
+                    <div style={{
+                        width: '56px', height: '56px', borderRadius: '12px',
+                        backgroundColor: '#C4B5FD', color: 'white',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>
+                        <Icon size={28} />
+                    </div>
+                    <div>
+                        <div style={{ fontSize: '16px', fontWeight: 500, color: 'var(--pk-text-main)' }}>
+                            {formData.name || 'Untitled Service'}
+                        </div>
+                        <div style={{ color: 'var(--pk-text-muted)', fontSize: '13px', marginTop: '2px' }}>
+                            {typeInfo?.title}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Assign Employees Card */}
+                <div style={{
+                    backgroundColor: 'white', borderRadius: '8px', border: '1px solid var(--pk-border)',
+                    overflow: 'hidden', display: 'flex', flexDirection: 'column'
+                }}>
+                    {/* Section Header */}
+                    <div style={{
+                        padding: '16px 24px', borderBottom: '1px solid var(--pk-border)',
+                        fontSize: '13px', fontWeight: 600, color: '#374151',
+                        borderLeft: '3px solid var(--pk-primary)', textTransform: 'uppercase', letterSpacing: '0.05em'
+                    }}>
+                        Assign Employees
+                    </div>
+
+                    {/* Search + Select All */}
+                    <div style={{
+                        padding: '16px 24px', display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', borderBottom: '1px solid var(--pk-border)'
+                    }}>
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: '8px',
+                            border: '1px solid var(--pk-border)', borderRadius: '6px',
+                            padding: '8px 12px', flex: '0 1 280px', backgroundColor: '#FAFAFA'
+                        }}>
+                            <Search size={16} color="#9CA3AF" />
+                            <input
+                                type="text"
+                                placeholder="Search Employees"
+                                value={staffSearch}
+                                onChange={(e) => setStaffSearch(e.target.value)}
+                                style={{
+                                    border: 'none', outline: 'none', fontSize: '14px',
+                                    backgroundColor: 'transparent', width: '100%',
+                                    color: 'var(--pk-text-main)'
+                                }}
+                            />
+                        </div>
+                        <label style={{
+                            display: 'flex', alignItems: 'center', gap: '8px',
+                            cursor: 'pointer', fontSize: '14px', color: 'var(--pk-text-main)',
+                            userSelect: 'none'
+                        }}>
+                            Select All
+                            <input
+                                type="checkbox"
+                                checked={allFilteredSelected}
+                                onChange={toggleSelectAll}
+                                style={{
+                                    width: '18px', height: '18px', accentColor: 'var(--pk-primary)',
+                                    cursor: 'pointer'
+                                }}
+                            />
+                        </label>
+                    </div>
+
+                    {/* Staff List */}
+                    <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                        {filteredStaff.length === 0 ? (
+                            <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--pk-text-muted)', fontSize: '14px' }}>
+                                No employees found
+                            </div>
+                        ) : (
+                            filteredStaff.map(staff => {
+                                const isSelected = selectedStaff.includes(staff.id);
+                                return (
+                                    <div
+                                        key={staff.id}
+                                        onClick={() => toggleStaff(staff.id)}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                            padding: '14px 24px', cursor: 'pointer',
+                                            borderBottom: '1px solid #F3F4F6',
+                                            transition: 'background-color 0.15s',
+                                            backgroundColor: isSelected ? '#FAFAFF' : 'white'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isSelected ? '#F3F0FF' : '#F9FAFB'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isSelected ? '#FAFAFF' : 'white'}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                            <div style={{
+                                                width: '40px', height: '40px', borderRadius: '50%',
+                                                backgroundColor: '#F3F4F6', color: '#9CA3AF',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: '14px', fontWeight: 500
+                                            }}>
+                                                {getInitials(staff.name)}
+                                            </div>
+                                            <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--pk-text-main)' }}>
+                                                {staff.name}
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            readOnly
+                                            style={{
+                                                width: '18px', height: '18px', accentColor: 'var(--pk-primary)',
+                                                cursor: 'pointer', pointerEvents: 'none'
+                                            }}
+                                        />
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+
+                    {/* Employees Assigned Footer */}
+                    <div style={{
+                        padding: '14px 24px', borderTop: '1px solid var(--pk-border)',
+                        display: 'flex', alignItems: 'center', gap: '12px',
+                        backgroundColor: '#FAFAFA', minHeight: '52px'
+                    }}>
+                        <span style={{ fontSize: '13px', color: 'var(--pk-text-muted)', whiteSpace: 'nowrap' }}>
+                            Employees Assigned:
+                        </span>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                            {assignedStaffList.length === 0 ? (
+                                <span style={{ fontSize: '13px', color: '#D1D5DB' }}>None selected</span>
+                            ) : (
+                                assignedStaffList.map(staff => (
+                                    <div
+                                        key={staff.id}
+                                        style={{ position: 'relative' }}
+                                        onMouseEnter={() => setHoveredStaff(staff.id)}
+                                        onMouseLeave={() => setHoveredStaff(null)}
+                                    >
+                                        <div style={{
+                                            width: '32px', height: '32px', borderRadius: '50%',
+                                            backgroundColor: '#E5E7EB', color: '#6B7280',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            fontSize: '11px', fontWeight: 600, cursor: 'default',
+                                            border: '2px solid white'
+                                        }}>
+                                            {getInitials(staff.name)}
+                                        </div>
+                                        {/* Tooltip */}
+                                        {hoveredStaff === staff.id && (
+                                            <div style={{
+                                                position: 'absolute', bottom: '100%', left: '50%',
+                                                transform: 'translateX(-50%)', marginBottom: '6px',
+                                                backgroundColor: '#374151', color: 'white',
+                                                padding: '4px 10px', borderRadius: '4px',
+                                                fontSize: '12px', whiteSpace: 'nowrap', zIndex: 10,
+                                                boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                                            }}>
+                                                {staff.name}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
+                    <Button variant="secondary" onClick={handleBack} style={{ padding: '10px 32px' }}>
+                        Back
+                    </Button>
+                    <Button
+                        variant="primary"
+                        style={{ padding: '10px 48px' }}
+                        onClick={handleCreateService}
+                        disabled={isCreating}
+                    >
+                        {isCreating ? 'Creating...' : 'Create Service'}
+                    </Button>
+                </div>
+            </div>
+        );
+    };
+
+    const renderCurrentStep = () => {
+        switch (step) {
+            case 1: return renderStep1();
+            case 2: return renderStep2();
+            case 3: return renderStep3();
+            default: return renderStep1();
+        }
     };
 
     return (
@@ -331,7 +662,7 @@ export const CreateServiceModal = ({ isOpen, onClose }) => {
             onClick={handleOverlayClick}
             style={{
                 position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                backgroundColor: '#F3F4F6', // Lighter grey background as seen in Zoho
+                backgroundColor: '#F3F4F6',
                 zIndex: 1000,
                 overflowY: 'auto'
             }}
@@ -339,7 +670,7 @@ export const CreateServiceModal = ({ isOpen, onClose }) => {
             <button onClick={onClose} style={{ position: 'fixed', right: '32px', top: '32px', background: 'none', border: 'none', cursor: 'pointer', color: '#6B7280', zIndex: 1001 }}>
                 <X size={24} />
             </button>
-            {step === 1 ? renderStep1() : renderStep2()}
+            {renderCurrentStep()}
         </div>
     );
 };

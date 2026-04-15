@@ -23,7 +23,7 @@ router.get('/', async (req, res, next) => {
 // Admin/Manager only: Create a new service
 router.post('/', rbacMiddleware(['Admin', 'Manager']), async (req, res, next) => {
     try {
-        const { name, description, duration_minutes, price } = req.body;
+        const { name, description, duration_minutes, price, service_type, meeting_mode, meeting_location, seats, staff_ids } = req.body;
         
         if (!name || !duration_minutes) {
              return res.status(400).json({ success: false, message: 'Name and duration_minutes are required' });
@@ -41,11 +41,27 @@ router.post('/', rbacMiddleware(['Admin', 'Manager']), async (req, res, next) =>
             description: description || '',
             duration_minutes: parseInt(duration_minutes, 10),
             price: parseFloat(price) || 0.0,
+            service_type: service_type || 'one-on-one',
+            meeting_mode: meeting_mode || 'Online',
+            meeting_location: meeting_location || '',
+            seats: parseInt(seats, 10) || 1,
             status: 'active'
         };
         
-        const rowPromise = table.insertRow(recordData);
-        const row = await rowPromise;
+        const row = await table.insertRow(recordData);
+
+        // Insert ServiceStaff join records
+        if (Array.isArray(staff_ids) && staff_ids.length > 0) {
+            const staffTable = datastore.table('ServiceStaff');
+            const staffPromises = staff_ids.map(staffId =>
+                staffTable.insertRow({
+                    service_id,
+                    staff_id: staffId,
+                    tenant_id: req.tenantId
+                })
+            );
+            await Promise.all(staffPromises);
+        }
         
         res.status(201).json({ success: true, data: row });
     } catch (err) {

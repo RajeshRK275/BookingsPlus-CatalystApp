@@ -112,3 +112,10 @@ CREATE TABLE Integrations (
     status VARCHAR(50),
     ROWID BIGINT
 );
+
+CREATE TABLE ServiceStaff (
+    tenant_id VARCHAR(100),
+    service_id BIGINT,
+    staff_id BIGINT,
+    ROWID BIGINT
+);
