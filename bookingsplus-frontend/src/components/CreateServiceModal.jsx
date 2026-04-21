@@ -139,10 +139,7 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
                 staff_ids: selectedStaff
             };
 
-            const token = localStorage.getItem('token');
-            const response = await axios.post('/server/bookingsplus/api/v1/services', payload, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+                        const response = await axios.post('/server/bookingsplus/api/v1/services', payload);
 
             if (response.data.success && onServiceCreated) {
                 onServiceCreated({

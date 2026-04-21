@@ -11,6 +11,8 @@ import Appointments from './pages/Appointments';
 import Calendar from './pages/Calendar';
 import Employees from './pages/Employees';
 import EmployeeDetail from './pages/EmployeeDetail';
+import Onboarding from './pages/Onboarding';
+import Signup from './pages/Signup';
 
 // Query Client for API caching
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -28,6 +30,8 @@ function App() {
                 <Router basename="/app">
                     <Routes>
                         <Route path="/login" element={<Login />} />
+                        <Route path="/signup" element={<Signup />} />
+                        <Route path="/onboarding" element={<Onboarding />} />
                         <Route path="/services/:serviceId" element={<ServiceDetail />} />
                         <Route path="/book/:serviceId" element={<PublicBooking />} />
                         

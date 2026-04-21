@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { X, MoreVertical, Share2, ClipboardCopy, Trash2, Copy, MoveRight, CheckSquare, Users, Clock, CalendarDays, Bell, FileText } from 'lucide-react';
 import ServiceDetailsTab from '../components/service-tabs/ServiceDetailsTab';
@@ -8,25 +8,7 @@ import SchedulingRulesTab from '../components/service-tabs/SchedulingRulesTab';
 import NotificationPreferencesTab from '../components/service-tabs/NotificationPreferencesTab';
 import BookingFormTab from '../components/service-tabs/BookingFormTab';
 import ShareServiceModal from '../components/ShareServiceModal';
-
-// Mock service data store (shared with Services.jsx through a simple module)
-const getServiceById = (id) => {
-    const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-    return services.find(s => String(s.id) === String(id)) || {
-        id: parseInt(id), name: 'Test Service', type: 'one-on-one', duration: 60,
-        price: '$0.00', priceType: 'Free', status: 'active',
-        meetingMode: 'Online', meetingLocation: 'Zoho Meeting',
-        visibility: 'Public', description: '', assignedStaff: []
-    };
-};
-
-const saveService = (service) => {
-    const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-    const index = services.findIndex(s => String(s.id) === String(service.id));
-    if (index >= 0) services[index] = service;
-    else services.push(service);
-    localStorage.setItem('bp_services', JSON.stringify(services));
-};
+import axios from 'axios';
 
 const TABS = [
     { id: 'details', label: 'Service Details', desc: 'Set the duration, payment type, and meeting mode.', icon: CheckSquare },
@@ -41,29 +23,67 @@ const ServiceDetail = () => {
     const { serviceId } = useParams();
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('details');
-    const [service, setService] = useState(() => getServiceById(serviceId));
+    const [service, setService] = useState({ name: 'Loading...', type: 'one-on-one' });
     const [showMenu, setShowMenu] = useState(false);
     const [showShare, setShowShare] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchService = async () => {
+            try {
+                const response = await axios.get('/server/bookingsplus/api/v1/services');
+                if (response.data && response.data.success) {
+                    const svc = response.data.data.find(s => String(s.id || s.service_id) === String(serviceId));
+                    if (svc) setService(svc);
+                }
+            } catch (err) {
+                 const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
+                 const svc = services.find(s => String(s.id) === String(serviceId));
+                 if (svc) setService(svc);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchService();
+    }, [serviceId]);
 
     const getInitials = (name) => name ? name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : 'SV';
 
-    const handleUpdate = (updatedService) => {
+    const handleUpdate = async (updatedService) => {
         setService(updatedService);
-        saveService(updatedService);
+        try {
+            const targetId = updatedService.id || updatedService.service_id;
+            await axios.put(`/server/bookingsplus/api/v1/services/${targetId}`, updatedService);
+        } catch (err) {
+            console.error('API update failed, updating local fallback', err);
+            const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
+            const index = services.findIndex(s => String(s.id) === String(updatedService.id));
+            if (index >= 0) services[index] = updatedService;
+            else services.push(updatedService);
+            localStorage.setItem('bp_services', JSON.stringify(services));
+        }
     };
 
-    const handleDelete = () => {
-        const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-        const filtered = services.filter(s => String(s.id) !== String(serviceId));
-        localStorage.setItem('bp_services', JSON.stringify(filtered));
-        navigate('/services');
+    const handleDelete = async () => {
+        try {
+            const targetId = service.id || service.service_id;
+            await axios.delete(`/server/bookingsplus/api/v1/services/${targetId}`);
+        } catch (err) {
+            console.error('API delete failed, deleting local fallback', err);
+            const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
+            const filtered = services.filter(s => String(s.id) !== String(serviceId));
+            localStorage.setItem('bp_services', JSON.stringify(filtered));
+        } finally {
+            navigate('/services');
+        }
     };
 
     const handleClose = () => navigate('/services');
 
-    const typeLabel = service.type ?
-        service.type.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('-') :
-        'One-on-One';
+    const typeVar = service.service_type || service.type || 'one-on-one';
+    const typeLabel = typeVar.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('-');
+
+    if (loading) return <div style={{ padding: '24px' }}>Loading...</div>;
 
     const renderTab = () => {
         switch (activeTab) {

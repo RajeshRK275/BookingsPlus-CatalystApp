@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Share2, Trash2, ArrowLeft, Pencil, Plus, Check, X } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { getEmployees, saveEmployees } from './Employees';
+import axios from 'axios';
 
 const EmployeeDetail = () => {
     const { employeeId } = useParams();
@@ -14,37 +14,81 @@ const EmployeeDetail = () => {
     const [emp, setEmp] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState({});
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const _employees = getEmployees();
-        const found = _employees.find(e => String(e.id) === String(employeeId));
-        if (found) {
-            setEmp(found);
-            setEditForm(found);
-        }
-
-        // Load assigned services
-        const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-        const assigned = services.filter(s => {
-            if (s.assignedStaff && s.assignedStaff.length > 0) {
-                return s.assignedStaff.includes(parseInt(employeeId));
+        const fetchEmployee = async () => {
+            try {
+                const response = await axios.get('/server/bookingsplus/api/v1/users');
+                
+                if (response.data && response.data.success) {
+                    const found = response.data.data.find(e => String(e.id || e.user_id) === String(employeeId));
+                    if (found) {
+                        setEmp(found);
+                        setEditForm(found);
+                    }
+                }
+            } catch (err) {
+                console.error('Error fetching employee from Catalyst:', err);
+                // Fallback for UI visualization
+                const fallbackEmps = JSON.parse(localStorage.getItem('bp_employees') || '[]');
+                const found = fallbackEmps.find(e => String(e.id) === String(employeeId));
+                if (found) {
+                    setEmp(found);
+                    setEditForm(found);
+                }
+            } finally {
+                setLoading(false);
             }
-            return true;
-        });
-        setAssignedServices(assigned);
+        };
+
+        const fetchServices = async () => {
+            try {
+                const response = await axios.get('/server/bookingsplus/api/v1/services');
+                
+                if (response.data && response.data.success) {
+                    const services = response.data.data;
+                    const assigned = services.filter(s => {
+                        // Advanced I/O data format parsing
+                        return true; // Simplify for now pending ServiceStaff join logic in React
+                    });
+                    setAssignedServices(assigned);
+                }
+            } catch (err) {
+                // Fallback
+                const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
+                setAssignedServices(services);
+            }
+        };
+
+        fetchEmployee();
+        fetchServices();
     }, [employeeId]);
 
-    const handleSave = () => {
-        const _employees = getEmployees();
-        const updatedIdx = _employees.findIndex(e => String(e.id) === String(employeeId));
-        if (updatedIdx > -1) {
-            _employees[updatedIdx] = { ...editForm };
-            saveEmployees(_employees);
+    const handleSave = async () => {
+        try {
+            const targetId = emp.id || emp.user_id;
+
+            // Attempt Catalyst update
+            await axios.put(`/server/bookingsplus/api/v1/users/${targetId}`, editForm);
+
             setEmp({ ...editForm });
+            setIsEditing(false);
+        } catch (err) {
+            console.error('Error updating employee in Catalyst:', err);
+            // Fallback for UI if Datastore strictly fails
+            const fallbackEmps = JSON.parse(localStorage.getItem('bp_employees') || '[]');
+            const idx = fallbackEmps.findIndex(e => String(e.id) === String(emp.id || emp.user_id));
+            if (idx > -1) {
+                fallbackEmps[idx] = { ...editForm };
+                localStorage.setItem('bp_employees', JSON.stringify(fallbackEmps));
+            }
+            setEmp({ ...editForm });
+            setIsEditing(false);
         }
-        setIsEditing(false);
     };
 
+    if (loading) return <div style={{ padding: '24px' }}>Loading Employee...</div>;
     if (!emp) return <div style={{ padding: '24px' }}>Employee not found.</div>;
 
     const renderField = (label, key) => {
@@ -109,7 +153,7 @@ const EmployeeDetail = () => {
                     {/* Header Card */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: '24px', borderBottom: '1px solid #F3F4F6' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                            <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: '#E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>👤</div>
+                            <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: emp.color || '#E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>{emp.initials || '👤'}</div>
                             <div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                                     <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{emp.name}</h2>
@@ -216,8 +260,8 @@ const EmployeeDetail = () => {
                             <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Assigned Services</h4>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 {assignedServices.slice(0, 3).map(service => (
-                                    <div key={service.id} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                        <div style={{ backgroundColor: '#C4B5FD', color: '#4C1D95', padding: '4px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, width: '28px', textAlign: 'center' }}>{service.name.slice(0,2).toUpperCase()}</div>
+                                    <div key={service.id || service.service_id} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <div style={{ backgroundColor: '#C4B5FD', color: '#4C1D95', padding: '4px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, width: '28px', textAlign: 'center' }}>{(service.name || '').slice(0,2).toUpperCase()}</div>
                                         <span style={{ fontSize: '14px', fontWeight: 500 }}>{service.name}</span>
                                     </div>
                                 ))}
@@ -255,19 +299,19 @@ const EmployeeDetail = () => {
                             <span></span>
                         </div>
                         {assignedServices.map(service => (
-                            <div key={service.id} 
-                                onClick={() => navigate(`/services/${service.id}`)}
+                            <div key={service.id || service.service_id} 
+                                onClick={() => navigate(`/services/${service.id || service.service_id}`)}
                                 style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.5fr', padding: '16px 24px', borderBottom: '1px solid #F3F4F6', alignItems: 'center', cursor: 'pointer', backgroundColor: 'white', transition: 'background-color 0.15s' }}
                                 onMouseEnter={e => e.currentTarget.style.backgroundColor = '#FAFAFA'}
                                 onMouseLeave={e => e.currentTarget.style.backgroundColor = 'white'}
                             >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                    <div style={{ backgroundColor: '#C4B5FD', color: '#4C1D95', width: '32px', height: '32px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }}>{service.name.slice(0,2).toUpperCase()}</div>
+                                    <div style={{ backgroundColor: '#C4B5FD', color: '#4C1D95', width: '32px', height: '32px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }}>{(service.name || '').slice(0,2).toUpperCase()}</div>
                                     <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--pk-text-main)' }}>{service.name}</span>
                                 </div>
-                                <div style={{ fontSize: '13px', color: 'var(--pk-text-main)' }}>{service.type === 'one-on-one' ? 'One-on-One' : (service.type === 'group' ? 'Group Booking' : 'Collective Booking')}</div>
-                                <div style={{ fontSize: '13px', color: 'var(--pk-text-main)' }}>{service.duration >= 60 ? `${Math.floor(service.duration/60)} Hour${service.duration%60 > 0 ? ` ${service.duration%60} mins` : ''}` : `${service.duration} mins`}</div>
-                                <div style={{ fontSize: '13px', color: 'var(--pk-text-main)' }}>{service.price}</div>
+                                <div style={{ fontSize: '13px', color: 'var(--pk-text-main)' }}>{service.service_type === 'group' || service.type === 'group' ? 'Group Booking' : 'One-on-One'}</div>
+                                <div style={{ fontSize: '13px', color: 'var(--pk-text-main)' }}>{(service.duration_minutes || service.duration || 60) >= 60 ? `${Math.floor((service.duration_minutes || service.duration || 60)/60)} Hour${(service.duration_minutes || service.duration || 60)%60 > 0 ? ` ${(service.duration_minutes || service.duration || 60)%60} mins` : ''}` : `${service.duration_minutes || service.duration || 60} mins`}</div>
+                                <div style={{ fontSize: '13px', color: 'var(--pk-text-main)' }}>${service.price}</div>
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                                     <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--pk-text-muted)' }}>•••</button>
                                 </div>

@@ -6,6 +6,7 @@ import WeekView from '../components/calendar/WeekView';
 import MonthView from '../components/calendar/MonthView';
 import AddAppointmentModal from '../components/calendar/AddAppointmentModal';
 import { format, addDays, subDays, startOfWeek, endOfWeek, addWeeks, subWeeks, addMonths, subMonths } from 'date-fns';
+import axios from 'axios';
 
 const MOCK_STAFF = [
     { id: 1, name: 'Jason Miller' },
@@ -24,10 +25,19 @@ const CalendarPage = () => {
     const [selectedSlot, setSelectedSlot] = useState(null); // { date, time, staffId }
 
     useEffect(() => {
-        const stored = localStorage.getItem('bp_appointments');
-        if (stored) {
-            setAppointments(JSON.parse(stored));
-        }
+        const fetchAppointments = async () => {
+            try {
+                                const res = await axios.get('/server/bookingsplus/api/v1/appointments');
+                if (res.data && res.data.success) {
+                    setAppointments(res.data.data);
+                }
+            } catch (err) {
+                console.error('Error fetching appointments for calendar:', err);
+                const fallback = JSON.parse(localStorage.getItem('bp_appointments') || '[]');
+                setAppointments(fallback);
+            }
+        };
+        fetchAppointments();
     }, []);
 
     // Filter staff based on role. If admin, show top 3 for UI similarity to images, or all. 
@@ -77,7 +87,6 @@ const CalendarPage = () => {
     const handleAppointmentAdded = (newApt) => {
         const updated = [...appointments, newApt];
         setAppointments(updated);
-        localStorage.setItem('bp_appointments', JSON.stringify(updated));
     };
 
     return (

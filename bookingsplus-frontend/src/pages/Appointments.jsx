@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Button } from '../ui/Button';
 import { Plus, Search, HelpCircle, Clock, Calendar } from 'lucide-react';
 import AddAppointmentModal from '../components/calendar/AddAppointmentModal';
+import axios from 'axios';
 
 const MOCK_STAFF = [
     { id: 1, name: 'Jason Miller' },
@@ -54,14 +55,30 @@ const Appointments = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-    const [appointments, setAppointments] = useState(() => {
-        return JSON.parse(localStorage.getItem('bp_appointments') || '[]');
-    });
+    const [appointments, setAppointments] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchAppointments = async () => {
+            try {
+                                const res = await axios.get('/server/bookingsplus/api/v1/appointments');
+                if (res.data && res.data.success) {
+                    setAppointments(res.data.data);
+                }
+            } catch (err) {
+                console.error('Error fetching appointments:', err);
+                const fallback = JSON.parse(localStorage.getItem('bp_appointments') || '[]');
+                setAppointments(fallback);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchAppointments();
+    }, []);
 
     const handleAppointmentAdded = (newApt) => {
         const updated = [...appointments, newApt];
         setAppointments(updated);
-        localStorage.setItem('bp_appointments', JSON.stringify(updated));
     };
 
     // Group by date

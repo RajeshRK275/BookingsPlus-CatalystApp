@@ -10,7 +10,6 @@ router.use(tenantMiddleware);
 // Retrieve appointments scoped to Tenant
 router.get('/', async (req, res, next) => {
     try {
-        // Strict tenant isolation via ZCQL
         const { date, status } = req.query;
         let query = `SELECT * FROM Appointments WHERE tenant_id = '${req.tenantId}'`;
 
@@ -18,51 +17,93 @@ router.get('/', async (req, res, next) => {
             query += ` AND appointment_status = '${status}'`;
         }
         
-        // ZCQL has limited datetime range queries, typically we fetch and filter or use strict equality
-        
         const result = await executeZCQL(req, query);
-        const appointments = result.map(row => row.Appointments);
+        const appointments = result.map(row => {
+            const apt = row.Appointments;
+            return {
+                id: apt.appointment_id || apt.ROWID,
+                ...apt
+            };
+        });
         res.json({ success: true, count: appointments.length, data: appointments });
     } catch (err) {
         next(err);
     }
 });
 
-// Request an appointment (Customer / Public booking)
-// Note: In reality public booking might skip token auth but requires org identifying key. 
-// For this SaaS admin interface we assume logged-in staff creating it on behalf of customer.
+// Request an appointment
 router.post('/book', async (req, res, next) => {
     try {
-        const { service_id, staff_id, customer_id, start_time, end_time, notes } = req.body;
+        const { service_id, service_name, staff_id, staff_name, customer_id, customer_name, start_time, end_time, notes } = req.body;
         
-        const appointment_id = Date.now(); 
+        const appointment_id = Date.now().toString(); 
         const datastore = getDatastore(req);
         
         const recordData = {
             appointment_id,
             tenant_id: req.tenantId,
             organization_id: req.user.organization_id,
-            service_id,
-            staff_id,
-            customer_id,
+            service_id: service_id || '',
+            service_name: service_name || '',
+            staff_id: staff_id || '',
+            staff_name: staff_name || '',
+            customer_id: customer_id || '',
+            customer_name: customer_name || '',
             appointment_status: 'pending',
-            start_time,
-            end_time,
+            start_time: start_time || '',
+            end_time: end_time || '',
             notes: notes || '',
             payment_status: 'unpaid',
-            // Enterprise feature: Bookings go into awaiting_approval state for Manager review
             approval_status: 'awaiting_approval' 
         };
         
-        const rowPromise = datastore.table('Appointments').insertRow(recordData);
-        await rowPromise;
-
-        // In a real Catalyst Event architecture, triggering the 'appointment_created' event would be dispatched here
-        // or automatically picked up by Event Triggers listening on Data Store row inserts.
-
-        res.status(201).json({ success: true, data: recordData });
+        const row = await datastore.table('Appointments').insertRow(recordData);
+        res.status(201).json({ success: true, data: row });
     } catch(err) {
          next(err);
+    }
+});
+
+// Update appointment
+router.put('/:id', async (req, res, next) => {
+    try {
+        const appointmentId = req.params.id;
+        const datastore = getDatastore(req);
+        
+        const query = `SELECT ROWID FROM Appointments WHERE tenant_id = '${req.tenantId}' AND appointment_id = '${appointmentId}'`;
+        const existing = await executeZCQL(req, query);
+        if (!existing || existing.length === 0) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+        
+        const updateData = {
+            ROWID: existing[0].Appointments.ROWID,
+            ...req.body
+        };
+        
+        const updatedRow = await datastore.table('Appointments').updateRow(updateData);
+        res.json({ success: true, data: updatedRow });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Delete appointment
+router.delete('/:id', async (req, res, next) => {
+    try {
+        const appointmentId = req.params.id;
+        const datastore = getDatastore(req);
+        
+        const query = `SELECT ROWID FROM Appointments WHERE tenant_id = '${req.tenantId}' AND appointment_id = '${appointmentId}'`;
+        const existing = await executeZCQL(req, query);
+        if (!existing || existing.length === 0) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+        
+        await datastore.table('Appointments').deleteRow(existing[0].Appointments.ROWID);
+        res.json({ success: true, message: 'Appointment deleted successfully' });
+    } catch (err) {
+        next(err);
     }
 });
 

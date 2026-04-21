@@ -1,46 +1,44 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
-const config = require('../../utils/config');
+const authMiddleware = require('../../middleware/auth.middleware');
+const { executeZCQL } = require('../../utils/datastore');
 
-// Login Route (Normally validates against Datastore Users table)
-router.post('/login', async (req, res, next) => {
+// Native GET /me to read standard Catalyst Cookie User context
+router.get('/me', authMiddleware, async (req, res, next) => {
     try {
-        const { email, password } = req.body;
-        
-        // Mock DB Verification
-        if (!email || !password) {
-            return res.status(400).json({ success: false, message: 'Email and password required' });
+        const userId = req.user.user_id; // from Catalyst
+
+        // Look up the user inside our Datastore
+        const query = `SELECT tenant_id, role FROM Users WHERE user_id = '${userId}'`;
+        const result = await executeZCQL(req, query);
+
+        if (result && result.length > 0) {
+            // User physically mapped in Datastore
+            const mappedParams = result[0].Users;
+            req.user.tenant_id = mappedParams.tenant_id;
+            req.user.role = mappedParams.role;
+            
+            return res.json({ 
+                success: true, 
+                needsOnboarding: false,
+                user: req.user
+            });
         }
 
-        // Simulating matching record from Datastore
-        const mockUser = {
-            user_id: 101,
-            tenant_id: 'org123',
-            organization_id: 501,
-            role: 'Admin', // Admin, Manager, Staff, Customer
-            name: 'System Admin'
-        };
-
-        const token = jwt.sign(
-            { 
-               user_id: mockUser.user_id, 
-               tenant_id: mockUser.tenant_id, 
-               organization_id: mockUser.organization_id,
-               role: mockUser.role 
-            },
-            config.jwtSecret,
-            { expiresIn: config.tokenExpiry }
-        );
-
+        // New Catalyst user missing Datastore tenant
         res.json({ 
-            success: true, 
-            token,
-            user: mockUser
+            success: true,
+            needsOnboarding: true,
+            user: req.user
         });
-
     } catch (err) {
-        next(err);
+        // ZCQL throws error if table doesn't exist, we fallback to needsOnboarding for fresh DBs
+        console.warn("User datastore map missing/schema empty", err);
+        res.json({ 
+            success: true,
+            needsOnboarding: true,
+            user: req.user
+        });
     }
 });
 

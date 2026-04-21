@@ -6,12 +6,16 @@ import { Outlet, Navigate } from 'react-router-dom';
 import '../index.css'; // Assume Zoho styles are here
 
 const MainLayout = () => {
-    const { isAuthenticated, loading } = useAuth();
+    const { isAuthenticated, loading, needsOnboarding } = useAuth();
 
     if (loading) return <div className="loading-screen">Loading BookingsPlus...</div>;
     
     if (!isAuthenticated) {
         return <Navigate to="/login" replace />;
+    }
+
+    if (needsOnboarding) {
+        return <Navigate to="/onboarding" replace />;
     }
 
     return (

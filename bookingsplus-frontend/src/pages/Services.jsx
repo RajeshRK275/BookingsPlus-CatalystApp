@@ -4,12 +4,8 @@ import { Button } from '../ui/Button';
 import { Plus, Search, Share2, LayoutGrid, List, ChevronDown } from 'lucide-react';
 import { CreateServiceModal } from '../components/CreateServiceModal';
 import ShareServiceModal from '../components/ShareServiceModal';
-
-const INITIAL_SERVICES = [
-    { id: 1, name: 'Initial Consultation', type: 'one-on-one', duration: 30, price: '$0.00', priceType: 'Free', status: 'active', meetingMode: 'Online', visibility: 'Public', assignedStaff: [1, 2] },
-    { id: 2, name: 'Deep Cleaning', type: 'group', duration: 60, price: '$150.00', priceType: 'Paid', priceValue: '150', status: 'active', meetingMode: 'Offline', visibility: 'Public', assignedStaff: [2] },
-    { id: 3, name: 'Follow-up Review', type: 'one-on-one', duration: 15, price: '$50.00', priceType: 'Paid', priceValue: '50', status: 'active', meetingMode: 'Online', visibility: 'Public', assignedStaff: [] }
-];
+import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
 
 const MOCK_STAFF = [
     { id: 1, name: 'Jason Miller' },
@@ -39,20 +35,33 @@ const formatType = (type) => {
 const AVATAR_COLORS = ['#C4B5FD', '#6EE7B7', '#FCA5A5', '#93C5FD', '#FDBA74'];
 
 const Services = () => {
+    const { user } = useAuth();
     const navigate = useNavigate();
-    const [services, setServices] = useState(() => {
-        const saved = localStorage.getItem('bp_services');
-        return saved ? JSON.parse(saved) : INITIAL_SERVICES;
-    });
+    const [services, setServices] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState('list');
     const [shareService, setShareService] = useState(null);
 
-    // Persist to localStorage whenever services change
     useEffect(() => {
-        localStorage.setItem('bp_services', JSON.stringify(services));
-    }, [services]);
+        const fetchServices = async () => {
+            try {
+                                const response = await axios.get('/server/bookingsplus/api/v1/services');
+                if (response.data && response.data.success) {
+                    setServices(response.data.data);
+                }
+            } catch (err) {
+                console.error('Error fetching services from Catalyst:', err);
+                const fallback = localStorage.getItem('bp_services');
+                if (fallback) setServices(JSON.parse(fallback));
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchServices();
+    }, []);
 
     const handleServiceCreated = (newService) => {
         setServices(prev => [...prev, newService]);
@@ -105,9 +114,11 @@ const Services = () => {
                                 display: 'flex', alignItems: 'center'
                             }}><List size={16} /></button>
                     </div>
-                    <Button variant="primary" onClick={() => setIsModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Plus size={16} /> New Service
-                    </Button>
+                    {user?.role === 'Admin' && (
+                        <Button variant="primary" onClick={() => setIsModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Plus size={16} /> New Service
+                        </Button>
+                    )}
                 </div>
             </div>
 
@@ -161,10 +172,10 @@ const Services = () => {
                                 </div>
 
                                 {/* Type */}
-                                <span style={{ fontSize: '13px', color: 'var(--pk-text-muted)' }}>{formatType(service.type)}</span>
+                                <span style={{ fontSize: '13px', color: 'var(--pk-text-muted)' }}>{formatType(service.service_type || service.type)}</span>
 
                                 {/* Duration */}
-                                <span style={{ fontSize: '13px', color: 'var(--pk-text-muted)' }}>{formatDuration(service.duration)}</span>
+                                <span style={{ fontSize: '13px', color: 'var(--pk-text-muted)' }}>{formatDuration(service.duration_minutes || service.duration)}</span>
 
                                 {/* Staff avatars */}
                                 <div style={{ display: 'flex', gap: '4px' }}>
