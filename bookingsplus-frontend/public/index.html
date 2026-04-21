@@ -15,16 +15,5 @@
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-
-    <!--
-      Zoho Catalyst Web SDK v4
-      1. catalystWebSDK.js  – core library (defines window.catalyst namespace)
-      2. /__catalyst/sdk/init.js – project-specific init script served by
-         Catalyst environment (sets project key, domain, etc.)
-      Both must load before catalyst.auth.* APIs can be called.
-      The React app polls for window.catalyst.auth readiness.
-    -->
-    <script src="https://static.zohocdn.com/catalyst/sdk/js/4.0.0/catalystWebSDK.js"></script>
-    <script src="/__catalyst/sdk/init.js" onerror="console.warn('Catalyst init.js not available — running outside Catalyst environment?')"></script>
   </body>
 </html>

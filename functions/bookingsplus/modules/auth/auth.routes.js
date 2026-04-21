@@ -1,45 +1,26 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../../middleware/auth.middleware');
-const { executeZCQL } = require('../../utils/datastore');
 
-// Native GET /me to read standard Catalyst Cookie User context
-router.get('/me', authMiddleware, async (req, res, next) => {
-    try {
-        const userId = req.user.user_id; // from Catalyst
+// ─────────────────────────────────────────────────────────────
+// Auth routes are currently disabled.
+// Login/Signup will be re-implemented later with Catalyst
+// embedded auth. For now, all routes are open.
+// ─────────────────────────────────────────────────────────────
 
-        // Look up the user inside our Datastore
-        const query = `SELECT tenant_id, role FROM Users WHERE user_id = '${userId}'`;
-        const result = await executeZCQL(req, query);
-
-        if (result && result.length > 0) {
-            // User physically mapped in Datastore
-            const mappedParams = result[0].Users;
-            req.user.tenant_id = mappedParams.tenant_id;
-            req.user.role = mappedParams.role;
-            
-            return res.json({ 
-                success: true, 
-                needsOnboarding: false,
-                user: req.user
-            });
-        }
-
-        // New Catalyst user missing Datastore tenant
-        res.json({ 
-            success: true,
-            needsOnboarding: true,
-            user: req.user
-        });
-    } catch (err) {
-        // ZCQL throws error if table doesn't exist, we fallback to needsOnboarding for fresh DBs
-        console.warn("User datastore map missing/schema empty", err);
-        res.json({ 
-            success: true,
-            needsOnboarding: true,
-            user: req.user
-        });
-    }
+// GET /me — Stub endpoint (returns mock user for dev)
+router.get('/me', (req, res) => {
+    res.json({
+        success: true,
+        user: {
+            user_id: 'dev-user-1',
+            email_id: 'admin@bookingsplus.dev',
+            first_name: 'Admin',
+            last_name: 'User',
+            role: 'Admin',
+            tenant_id: 'dev-tenant-1',
+            organization_id: 'dev-org-1',
+        },
+    });
 });
 
 module.exports = router;

@@ -1,11 +1,10 @@
 import React from 'react';
 import { Bell, Calendar, User, Settings, CheckSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-
 import { Link } from 'react-router-dom';
 
 const Topbar = () => {
-    const { user, logout } = useAuth();
+    const { user } = useAuth();
 
     return (
         <header className="topbar">
@@ -23,7 +22,7 @@ const Topbar = () => {
                 </Link>
                 <button className="icon-btn" title="Notifications"><Bell size={20} /></button>
                 <button className="icon-btn" title="Settings"><Settings size={20} /></button>
-                <div className="user-profile" onClick={logout} title={user?.name}>
+                <div className="user-profile" title={user?.name}>
                     <User size={18} />
                 </div>
             </div>
