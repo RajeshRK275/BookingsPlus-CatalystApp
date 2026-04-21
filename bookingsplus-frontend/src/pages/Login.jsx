@@ -1,37 +1,105 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+
+/**
+ * Waits for the Catalyst Web SDK (`window.catalyst`) to be ready.
+ * The SDK is loaded via two <script> tags in index.html:
+ *   1. catalystWebSDK.js  – SDK library
+ *   2. /__catalyst/sdk/init.js – project-specific init (sets project key, etc.)
+ * Both are async, so they may not be available immediately when React mounts.
+ */
+const waitForCatalystSDK = (timeoutMs = 10000) => {
+    return new Promise((resolve, reject) => {
+        // Already ready?
+        if (window.catalyst && window.catalyst.auth) {
+            return resolve(window.catalyst);
+        }
+        const start = Date.now();
+        const check = setInterval(() => {
+            if (window.catalyst && window.catalyst.auth) {
+                clearInterval(check);
+                resolve(window.catalyst);
+            } else if (Date.now() - start > timeoutMs) {
+                clearInterval(check);
+                reject(new Error('Catalyst SDK failed to load within timeout'));
+            }
+        }, 150);
+    });
+};
 
 const Login = () => {
     const { isAuthenticated, loading, refreshUser } = useAuth();
     const containerRef = useRef(null);
-    const mounted = useRef(false);
+    const widgetMounted = useRef(false);
+    const pollRef = useRef(null);
+
+    // Stable polling callback — keeps checking /me until the user is authenticated
+    const startPolling = useCallback(() => {
+        // Don't double-start
+        if (pollRef.current) return;
+        pollRef.current = setInterval(async () => {
+            try {
+                await refreshUser();
+            } catch {
+                // Not yet authenticated — expected, keep polling
+            }
+        }, 2500);
+    }, [refreshUser]);
+
+    const stopPolling = useCallback(() => {
+        if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+        }
+    }, []);
 
     useEffect(() => {
-        if (loading || isAuthenticated || mounted.current) return;
+        // Nothing to do while the auth state is still being determined
+        if (loading || isAuthenticated) return;
 
-        const tryMount = () => {
-            if (window.catalyst && window.catalyst.auth && containerRef.current) {
-                window.catalyst.auth.signIn('catalyst-auth-container');
-                mounted.current = true;
+        let cancelled = false;
 
-                // Poll /me after sign-in so React state updates without a hard reload
-                const interval = setInterval(async () => {
-                    try {
-                        await refreshUser();
-                    } catch {
-                        // not yet authenticated
-                    }
-                }, 2000);
+        const mountWidget = async () => {
+            try {
+                const catalystSDK = await waitForCatalystSDK();
+                if (cancelled || !containerRef.current) return;
 
-                return () => clearInterval(interval);
+                // Avoid mounting twice (React 18 strict-mode can double-invoke effects)
+                if (widgetMounted.current) return;
+
+                // Clear any previous content in the container (safety net for re-mounts)
+                containerRef.current.innerHTML = '';
+
+                // Mount the Catalyst embedded sign-in widget
+                catalystSDK.auth.signIn('catalyst-login-container');
+                widgetMounted.current = true;
+
+                // Start polling /me so React state updates after the user signs in
+                // inside the Catalyst iframe
+                startPolling();
+            } catch (err) {
+                console.error('Failed to mount Catalyst Auth widget:', err);
             }
         };
 
-        // Give the SDK scripts a moment to fully initialize
-        const timeout = setTimeout(tryMount, 300);
-        return () => clearTimeout(timeout);
-    }, [loading, isAuthenticated, refreshUser]);
+        mountWidget();
+
+        return () => {
+            cancelled = true;
+            stopPolling();
+        };
+    }, [loading, isAuthenticated, startPolling, stopPolling]);
+
+    // Stop polling as soon as the user becomes authenticated
+    useEffect(() => {
+        if (isAuthenticated) stopPolling();
+    }, [isAuthenticated, stopPolling]);
+
+    // Reset widgetMounted on unmount so a future mount can re-init
+    useEffect(() => {
+        return () => { widgetMounted.current = false; };
+    }, []);
 
     if (!loading && isAuthenticated) {
         return <Navigate to="/" replace />;
@@ -47,8 +115,8 @@ const Login = () => {
                     <p style={styles.tagline}>Sign in to your workspace</p>
                 </div>
 
-                {/* Catalyst embedded iFrame target */}
-                <div id="catalyst-auth-container" style={styles.widgetContainer} ref={containerRef} />
+                {/* Catalyst embedded sign-in widget target */}
+                <div id="catalyst-login-container" style={styles.widgetContainer} ref={containerRef} />
 
                 {/* Footer link */}
                 <p style={styles.footer}>

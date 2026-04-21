@@ -31,3 +31,6 @@ dist/
 
 # Catalyst specific
 .catalyst/
+
+# Zoho IDE
+.zcode/

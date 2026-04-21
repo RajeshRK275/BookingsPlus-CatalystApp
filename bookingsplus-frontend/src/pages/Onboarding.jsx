@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 
 const Onboarding = () => {
     const { user, refreshUser } = useAuth();
+    const navigate = useNavigate();
     const [orgName, setOrgName] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -24,8 +26,9 @@ const Onboarding = () => {
             });
 
             if (response.data.success) {
-                // Refresh the Auth context to clear needsOnboarding state and dive into Dashboard
+                // Refresh the Auth context to clear needsOnboarding state, then go to Dashboard
                 await refreshUser();
+                navigate('/', { replace: true });
             } else {
                 setError(response.data.message || 'Failed to setup organization');
             }

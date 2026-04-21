@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import MainLayout from './layouts/MainLayout';
 import Login from './pages/Login';
@@ -26,15 +26,15 @@ const queryClient = new QueryClient({
 function App() {
     return (
         <QueryClientProvider client={queryClient}>
-            <AuthProvider>
-                <Router basename="/app">
+            <Router>
+                <AuthProvider>
                     <Routes>
                         <Route path="/login" element={<Login />} />
                         <Route path="/signup" element={<Signup />} />
                         <Route path="/onboarding" element={<Onboarding />} />
                         <Route path="/services/:serviceId" element={<ServiceDetail />} />
                         <Route path="/book/:serviceId" element={<PublicBooking />} />
-                        
+
                         <Route element={<MainLayout />}>
                             <Route path="/" element={<Dashboard />} />
                             <Route path="/appointments" element={<Appointments />} />
@@ -45,8 +45,8 @@ function App() {
                             <Route path="/customers" element={<div>Customers Page Placeholder</div>} />
                         </Route>
                     </Routes>
-                </Router>
-            </AuthProvider>
+                </AuthProvider>
+            </Router>
         </QueryClientProvider>
     );
 }

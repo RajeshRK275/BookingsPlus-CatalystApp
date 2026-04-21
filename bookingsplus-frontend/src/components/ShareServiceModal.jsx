@@ -10,7 +10,7 @@ const ShareServiceModal = ({ isOpen, onClose, service }) => {
 
     if (!isOpen || !service) return null;
 
-    const bookingUrl = `${window.location.origin}/app/book/${service.id}`;
+    const bookingUrl = `${window.location.origin}${window.location.pathname}#/book/${service.id}`;
 
     const handleCopy = () => {
         navigator.clipboard.writeText(bookingUrl);

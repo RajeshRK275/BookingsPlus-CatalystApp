@@ -1,6 +1,27 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+
+/**
+ * Waits for the Catalyst Web SDK (`window.catalyst`) to be ready.
+ */
+const waitForCatalystSDK = (timeoutMs = 10000) => {
+    return new Promise((resolve, reject) => {
+        if (window.catalyst && window.catalyst.auth) {
+            return resolve(window.catalyst);
+        }
+        const start = Date.now();
+        const check = setInterval(() => {
+            if (window.catalyst && window.catalyst.auth) {
+                clearInterval(check);
+                resolve(window.catalyst);
+            } else if (Date.now() - start > timeoutMs) {
+                clearInterval(check);
+                reject(new Error('Catalyst SDK failed to load within timeout'));
+            }
+        }, 150);
+    });
+};
 
 // Signup uses the same Catalyst embedded widget as Login.
 // When "Public Signup" is enabled in the Catalyst Console, the widget shows
@@ -8,32 +29,69 @@ import { useAuth } from '../contexts/AuthContext';
 const Signup = () => {
     const { isAuthenticated, loading, refreshUser } = useAuth();
     const containerRef = useRef(null);
-    const mounted = useRef(false);
+    const widgetMounted = useRef(false);
+    const pollRef = useRef(null);
+
+    const startPolling = useCallback(() => {
+        if (pollRef.current) return;
+        pollRef.current = setInterval(async () => {
+            try {
+                await refreshUser();
+            } catch {
+                // Not yet authenticated — expected
+            }
+        }, 2500);
+    }, [refreshUser]);
+
+    const stopPolling = useCallback(() => {
+        if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+        }
+    }, []);
 
     useEffect(() => {
-        if (loading || isAuthenticated || mounted.current) return;
+        if (loading || isAuthenticated) return;
 
-        const tryMount = () => {
-            if (window.catalyst && window.catalyst.auth && containerRef.current) {
-                window.catalyst.auth.signIn('catalyst-signup-container');
-                mounted.current = true;
+        let cancelled = false;
 
-                // Poll /me after sign-up so React state updates without a hard reload
-                const interval = setInterval(async () => {
-                    try {
-                        await refreshUser();
-                    } catch {
-                        // not yet authenticated
-                    }
-                }, 2000);
+        const mountWidget = async () => {
+            try {
+                const catalystSDK = await waitForCatalystSDK();
+                if (cancelled || !containerRef.current) return;
 
-                return () => clearInterval(interval);
+                if (widgetMounted.current) return;
+
+                // Clear any previous content
+                containerRef.current.innerHTML = '';
+
+                // Mount the Catalyst embedded sign-in/sign-up widget
+                catalystSDK.auth.signIn('catalyst-signup-container');
+                widgetMounted.current = true;
+
+                startPolling();
+            } catch (err) {
+                console.error('Failed to mount Catalyst Auth widget:', err);
             }
         };
 
-        const timeout = setTimeout(tryMount, 300);
-        return () => clearTimeout(timeout);
-    }, [loading, isAuthenticated, refreshUser]);
+        mountWidget();
+
+        return () => {
+            cancelled = true;
+            stopPolling();
+        };
+    }, [loading, isAuthenticated, startPolling, stopPolling]);
+
+    // Stop polling as soon as the user becomes authenticated
+    useEffect(() => {
+        if (isAuthenticated) stopPolling();
+    }, [isAuthenticated, stopPolling]);
+
+    // Reset widgetMounted on unmount
+    useEffect(() => {
+        return () => { widgetMounted.current = false; };
+    }, []);
 
     if (!loading && isAuthenticated) {
         return <Navigate to="/" replace />;
@@ -49,7 +107,7 @@ const Signup = () => {
                     <p style={styles.tagline}>Create your free workspace</p>
                 </div>
 
-                {/* Catalyst embedded iFrame target */}
+                {/* Catalyst embedded sign-in/sign-up widget target */}
                 <div id="catalyst-signup-container" style={styles.widgetContainer} ref={containerRef} />
 
                 {/* Footer link */}
