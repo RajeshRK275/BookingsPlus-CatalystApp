@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Share2, Plus } from 'lucide-react';
 import { Button } from '../ui/Button';
 import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+import PermissionGate from '../components/PermissionGate';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 
-// We now rely on the Catalyst remote Datastore.
 const Employees = () => {
-    const { user } = useAuth();
     const navigate = useNavigate();
+    const { activeWorkspace } = useWorkspace();
+    const wsSlug = activeWorkspace?.workspace_slug || '';
     const [searchQuery, setSearchQuery] = useState('');
     const [employees, setEmployees] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -57,11 +58,11 @@ const Employees = () => {
                             onChange={(e) => setSearchQuery(e.target.value)}
                             style={{ border: 'none', outline: 'none', fontSize: '13px', width: '100%', backgroundColor: 'transparent' }} />
                     </div>
-                    {user?.role === 'Admin' && (
+                    <PermissionGate permission="users.create">
                         <Button variant="primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <Plus size={16} /> New Employee
                         </Button>
-                    )}
+                    </PermissionGate>
                 </div>
             </div>
 
@@ -72,7 +73,7 @@ const Employees = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
                     {filteredEmployees.map(emp => (
                         <div key={emp.id || emp.user_id} 
-                            onClick={() => navigate(`/employees/${emp.id || emp.user_id}`)}
+                            onClick={() => navigate(`/ws/${wsSlug}/employees/${emp.id || emp.user_id}`)}
                             style={{
                                 backgroundColor: 'white', borderRadius: '12px', padding: '20px',
                                 border: '1px solid var(--pk-border)', cursor: 'pointer', transition: 'box-shadow 0.2s, transform 0.1s'

@@ -1,26 +1,32 @@
 const express = require('express');
 const router = express.Router();
+const asyncHandler = require('../../core/async-handler');
+const response = require('../../core/response');
+const authMiddleware = require('../../middleware/auth.middleware');
+const authService = require('./auth.service');
 
-// ─────────────────────────────────────────────────────────────
-// Auth routes are currently disabled.
-// Login/Signup will be re-implemented later with Catalyst
-// embedded auth. For now, all routes are open.
-// ─────────────────────────────────────────────────────────────
+/**
+ * GET /me — Returns the authenticated user profile with workspaces.
+ */
+router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
+    const userId = req.user.user_id || req.user.ROWID;
+    const workspaces = await authService.getUserWorkspaces(req, userId);
+    const setupCompleted = await authService.isSetupCompleted(req);
 
-// GET /me — Stub endpoint (returns mock user for dev)
-router.get('/me', (req, res) => {
-    res.json({
-        success: true,
-        user: {
-            user_id: 'dev-user-1',
-            email_id: 'admin@bookingsplus.dev',
-            first_name: 'Admin',
-            last_name: 'User',
-            role: 'Admin',
-            tenant_id: 'dev-tenant-1',
-            organization_id: 'dev-org-1',
-        },
+    return response.success(res, {
+        user: authService.formatUserResponse(req.user),
+        workspaces,
+        setupCompleted,
     });
-});
+}));
+
+/**
+ * GET /me/permissions — Returns user permissions in the active workspace.
+ */
+router.get('/me/permissions', authMiddleware, asyncHandler(async (req, res) => {
+    const workspaceId = req.headers['x-workspace-id'];
+    const result = await authService.getUserPermissions(req, req.user, workspaceId);
+    return response.success(res, result);
+}));
 
 module.exports = router;

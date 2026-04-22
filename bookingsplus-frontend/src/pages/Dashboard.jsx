@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePermissions } from '../contexts/PermissionContext';
 import { Button } from '../ui/Button';
 import { Calendar as CalendarIcon, Users, DollarSign, TrendingUp, Plus, ArrowRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { format, subDays, isSameDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 import AddAppointmentModal from '../components/calendar/AddAppointmentModal';
 
 const MOCK_STAFF = [
@@ -17,7 +19,10 @@ const MOCK_STAFF = [
 
 const Dashboard = () => {
     const { user } = useAuth();
+    const { hasPermission, isSuperAdmin } = usePermissions();
+    const { activeWorkspace } = useWorkspace();
     const navigate = useNavigate();
+    const wsSlug = activeWorkspace?.workspace_slug || '';
     
     const [appointments, setAppointments] = useState([]);
     const [servicesCount, setServicesCount] = useState(0);
@@ -41,7 +46,7 @@ const Dashboard = () => {
 
     const metrics = useMemo(() => {
         let relevantApts = appointments;
-        if (user?.role !== 'Admin' && user?.role !== 'Super Admin') {
+        if (!isSuperAdmin && !hasPermission('appointments.read')) {
             relevantApts = appointments.filter(a => a.staff_name === user?.name);
         }
 
@@ -67,7 +72,7 @@ const Dashboard = () => {
     // Generate chart data for last 7 days
     const chartData = useMemo(() => {
         let relevantApts = appointments;
-        if (user?.role !== 'Admin' && user?.role !== 'Super Admin') {
+        if (!isSuperAdmin && !hasPermission('appointments.read')) {
             relevantApts = appointments.filter(a => a.staff_name === user?.name);
         }
 
@@ -88,7 +93,7 @@ const Dashboard = () => {
     // Recent upcoming appointments (sort by soonest)
     const recentUpcoming = useMemo(() => {
         let relevantApts = appointments;
-        if (user?.role !== 'Admin' && user?.role !== 'Super Admin') {
+        if (!isSuperAdmin && !hasPermission('appointments.read')) {
             relevantApts = appointments.filter(a => a.staff_name === user?.name);
         }
         
@@ -186,10 +191,10 @@ const Dashboard = () => {
                             <Button variant="primary" onClick={() => setIsAddModalOpen(true)} style={{ width: '100%', justifyContent: 'center', gap: '8px', padding: '12px' }}>
                                 <Plus size={18} /> Book Appointment
                             </Button>
-                            <Button variant="outline" onClick={() => navigate('/services')} style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
+                            <Button variant="outline" onClick={() => navigate(`/ws/${wsSlug}/services`)} style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
                                 Manage Services
                             </Button>
-                            <Button variant="outline" onClick={() => navigate('/calendar')} style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
+                            <Button variant="outline" onClick={() => navigate(`/ws/${wsSlug}/calendar`)} style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
                                 View Calendar
                             </Button>
                         </div>
@@ -213,7 +218,7 @@ const Dashboard = () => {
             <div style={{ backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', border: '1px solid var(--pk-border)', overflow: 'hidden' }}>
                 <div style={{ padding: '24px', borderBottom: '1px solid var(--pk-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>Upcoming Activity</h3>
-                    <button onClick={() => navigate('/appointments')} style={{ background: 'none', border: 'none', fontSize: '14px', color: 'var(--pk-primary)', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <button onClick={() => navigate(`/ws/${wsSlug}/appointments`)} style={{ background: 'none', border: 'none', fontSize: '14px', color: 'var(--pk-primary)', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         View All <ArrowRight size={14} />
                     </button>
                 </div>

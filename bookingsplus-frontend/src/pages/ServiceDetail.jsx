@@ -9,6 +9,7 @@ import NotificationPreferencesTab from '../components/service-tabs/NotificationP
 import BookingFormTab from '../components/service-tabs/BookingFormTab';
 import ShareServiceModal from '../components/ShareServiceModal';
 import axios from 'axios';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 
 const TABS = [
     { id: 'details', label: 'Service Details', desc: 'Set the duration, payment type, and meeting mode.', icon: CheckSquare },
@@ -22,6 +23,8 @@ const TABS = [
 const ServiceDetail = () => {
     const { serviceId } = useParams();
     const navigate = useNavigate();
+    const { activeWorkspace } = useWorkspace();
+    const wsSlug = activeWorkspace?.workspace_slug || '';
     const [activeTab, setActiveTab] = useState('details');
     const [service, setService] = useState({ name: 'Loading...', type: 'one-on-one' });
     const [showMenu, setShowMenu] = useState(false);
@@ -74,11 +77,11 @@ const ServiceDetail = () => {
             const filtered = services.filter(s => String(s.id) !== String(serviceId));
             localStorage.setItem('bp_services', JSON.stringify(filtered));
         } finally {
-            navigate('/services');
+            navigate(`/ws/${wsSlug}/services`);
         }
     };
 
-    const handleClose = () => navigate('/services');
+    const handleClose = () => navigate(`/ws/${wsSlug}/services`);
 
     const typeVar = service.service_type || service.type || 'one-on-one';
     const typeLabel = typeVar.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('-');

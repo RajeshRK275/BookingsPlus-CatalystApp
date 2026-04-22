@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Search, Building2, LayoutGrid, Puzzle, Palette, ShieldCheck, Users, MapPin, CalendarDays, Video, TrendingUp, CreditCard, Link2, Bell, Download, ChevronRight } from 'lucide-react';
+import './Settings.css';
 
 /* ─── Settings Sub-page Components ─── */
 
@@ -185,35 +186,26 @@ const EmployeesSettings = ({ onBack }) => {
 
 // ===================== MODULES =====================
 
-const WorkspacesSettings = ({ onBack }) => {
-    const workspaces = [
-        { id: 1, name: 'JINS', services: 30, members: 5, color: '#a78bfa' },
-        { id: 2, name: 'Sunmarke', services: 11, members: 3, color: '#6ee7b7' },
-        { id: 3, name: 'Property', services: 2, members: 2, color: '#fca5a5' },
-    ];
-
+const OrganizationOverview = ({ onBack }) => {
     return (
-        <SettingsSubPage title="Workspaces" subtitle="Manage workspaces and their configurations" onBack={onBack}>
+        <SettingsSubPage title="Organization Overview" subtitle="View your organization details" onBack={onBack}>
             <div className="settings-card">
-                <div className="settings-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3>All Workspaces</h3>
-                    <button className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 16px' }}>+ New Workspace</button>
+                <div className="settings-card-header">
+                    <h3>Your Organization</h3>
                 </div>
                 <div className="settings-list">
-                    {workspaces.map(ws => (
-                        <div key={ws.id} className="settings-list-item">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: ws.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 600, fontSize: '14px' }}>
-                                    {ws.name.substring(0, 2).toUpperCase()}
-                                </div>
-                                <div>
-                                    <div style={{ fontWeight: 500, fontSize: '14px' }}>{ws.name}</div>
-                                    <div style={{ fontSize: '12px', color: 'var(--pk-text-muted)' }}>{ws.services} Services · {ws.members} Members</div>
-                                </div>
+                    <div className="settings-list-item">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#a78bfa', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 600, fontSize: '14px' }}>
+                                B+
                             </div>
-                            <ChevronRight size={16} color="var(--pk-text-muted)" />
+                            <div>
+                                <div style={{ fontWeight: 500, fontSize: '14px' }}>Bookings+</div>
+                                <div style={{ fontSize: '12px', color: 'var(--pk-text-muted)' }}>Single-tenant deployment</div>
+                            </div>
                         </div>
-                    ))}
+                        <span style={{ fontSize: '12px', background: '#dcfce7', color: '#166534', padding: '3px 10px', borderRadius: '9999px', fontWeight: 500 }}>Active</span>
+                    </div>
                 </div>
             </div>
         </SettingsSubPage>
@@ -838,7 +830,7 @@ const settingsCategories = [
         iconBg: '#EEF2FF',
         iconColor: '#4F46E5',
         items: [
-            { id: 'workspaces', label: 'Workspaces' },
+            { id: 'organization-overview', label: 'Organization Overview' },
             { id: 'resources', label: 'Resources' },
             { id: 'in-person-locations', label: 'In-person Locations' },
             { id: 'customers-settings', label: 'Customers' },
@@ -895,7 +887,7 @@ const subPageMap = {
     'business-booking-page': BusinessBookingPage,
     'customer-login-prefs': CustomerLoginPreferences,
     'employees-settings': EmployeesSettings,
-    'workspaces': WorkspacesSettings,
+    'organization-overview': OrganizationOverview,
     'resources': ResourcesSettings,
     'in-person-locations': InPersonLocations,
     'customers-settings': CustomersSettings,

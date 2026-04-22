@@ -3,7 +3,7 @@ import Topbar from './Topbar';
 import Sidebar from './Sidebar';
 import NotificationPanel from '../components/NotificationPanel';
 import { Outlet } from 'react-router-dom';
-import '../index.css';
+import './MainLayout.css';
 
 const MainLayout = () => {
     const [isNotifOpen, setIsNotifOpen] = useState(false);

@@ -3,7 +3,14 @@
 		"name": "bookingsplus",
 		"stack": "node20",
 		"type": "advancedio",
-		"env_variables": {}
+		"env_variables": {
+			"NODE_ENV": "production",
+			"DEV_MODE": "false",
+			"ENABLE_AUDIT_LOG": "true",
+			"ADMIN_WEBHOOK_SECRET": "CHANGE_ME_TO_A_SECURE_SECRET",
+			"INITIAL_SUPER_ADMIN_EMAIL": "",
+			"DEFAULT_WORKSPACE_ROLES": "Owner,Admin,Manager,Staff"
+		}
 	},
 	"execution": {
 		"main": "index.js"

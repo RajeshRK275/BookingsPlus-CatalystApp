@@ -5,7 +5,8 @@ import { Plus, Search, Share2, LayoutGrid, List, ChevronDown } from 'lucide-reac
 import { CreateServiceModal } from '../components/CreateServiceModal';
 import ShareServiceModal from '../components/ShareServiceModal';
 import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import PermissionGate from '../components/PermissionGate';
 
 const MOCK_STAFF = [
     { id: 1, name: 'Jason Miller' },
@@ -35,8 +36,9 @@ const formatType = (type) => {
 const AVATAR_COLORS = ['#C4B5FD', '#6EE7B7', '#FCA5A5', '#93C5FD', '#FDBA74'];
 
 const Services = () => {
-    const { user } = useAuth();
+    const { activeWorkspace } = useWorkspace();
     const navigate = useNavigate();
+    const wsSlug = activeWorkspace?.workspace_slug || '';
     const [services, setServices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -114,11 +116,11 @@ const Services = () => {
                                 display: 'flex', alignItems: 'center'
                             }}><List size={16} /></button>
                     </div>
-                    {user?.role === 'Admin' && (
+                    <PermissionGate permission="services.create">
                         <Button variant="primary" onClick={() => setIsModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <Plus size={16} /> New Service
                         </Button>
-                    )}
+                    </PermissionGate>
                 </div>
             </div>
 
@@ -151,7 +153,7 @@ const Services = () => {
                         return (
                             <div
                                 key={service.id}
-                                onClick={() => navigate(`/services/${service.id}`)}
+                                onClick={() => navigate(`/ws/${wsSlug}/services/${service.id || service.service_id || service.ROWID}`)}
                                 style={{
                                     display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 0.8fr',
                                     padding: '14px 20px', borderBottom: '1px solid #F3F4F6',

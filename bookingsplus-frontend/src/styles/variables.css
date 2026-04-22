@@ -1,0 +1,62 @@
+/* ═══════════════════════════════════════════════
+   DESIGN TOKENS — Single source of truth
+   ═══════════════════════════════════════════════ */
+
+:root {
+  /* Primary Palette */
+  --pk-primary: #5C44B5;
+  --pk-primary-hover: #4e389e;
+  --pk-primary-light: #F3F0FF;
+  --pk-primary-surface: #F5F3FF;
+  --pk-primary-muted: #EDE9F6;
+
+  /* Surface & Background */
+  --pk-bg: #ffffff;
+  --pk-surface: #ffffff;
+  --pk-surface-alt: #F8FAFC;
+  --pk-surface-hover: #FAFAFA;
+  --pk-surface-subtle: #F9FAFB;
+
+  /* Borders */
+  --pk-border: #E5E7EB;
+  --pk-border-light: #F3F4F6;
+
+  /* Text */
+  --pk-text-main: #111827;
+  --pk-text-muted: #6B7280;
+  --pk-text-subtle: #9CA3AF;
+  --pk-text-inverse: #ffffff;
+
+  /* Status Colors */
+  --pk-success: #16A34A;
+  --pk-success-bg: #DCFCE7;
+  --pk-warning: #D97706;
+  --pk-warning-bg: #FEF3C7;
+  --pk-error: #EF4444;
+  --pk-error-bg: #FEE2E2;
+  --pk-info: #2563EB;
+  --pk-info-bg: #DBEAFE;
+
+  /* Layout */
+  --pk-sidebar-width: 250px;
+  --pk-topbar-height: 64px;
+
+  /* Shadows */
+  --pk-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.02);
+  --pk-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --pk-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --pk-shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.08);
+  --pk-shadow-overlay: 0 20px 60px rgba(0, 0, 0, 0.15);
+
+  /* Radii */
+  --pk-radius-sm: 4px;
+  --pk-radius-md: 6px;
+  --pk-radius-lg: 8px;
+  --pk-radius-xl: 12px;
+  --pk-radius-full: 9999px;
+
+  /* Transitions */
+  --pk-transition-fast: 0.15s ease;
+  --pk-transition-normal: 0.2s ease;
+  --pk-transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}

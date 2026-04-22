@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Calendar, User, Settings, ChevronDown, CreditCard, Link2, Grid } from 'lucide-react';
+import './NotificationPanel.css';
 
 const CATEGORIES = [
     { key: 'all', label: 'All' },

@@ -1,0 +1,41 @@
+/* ═══════════════════════════════════════════════
+   SHARED FORM ELEMENTS
+   Used by: CreateServiceModal, AddAppointmentModal,
+   ServiceDetail tabs, Settings sub-pages
+   ═══════════════════════════════════════════════ */
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color var(--pk-transition-normal);
+  outline: none;
+  background: var(--pk-surface);
+  color: var(--pk-text-main);
+}
+
+.input:focus {
+  border-color: var(--pk-primary);
+  box-shadow: 0 0 0 2px rgba(92, 68, 181, 0.1);
+}
+
+.input:disabled {
+  background-color: var(--pk-surface-subtle);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--pk-text-main);
+}

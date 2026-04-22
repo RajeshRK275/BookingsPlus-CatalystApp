@@ -1,0 +1,66 @@
+/* ═══════════════════════════════════════════════
+   SHARED TABLE STYLES
+   Used by: ui/Table.jsx, Settings sub-pages
+   ═══════════════════════════════════════════════ */
+
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-lg);
+  background-color: var(--pk-surface);
+}
+
+.z-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.z-th {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--pk-border);
+  background-color: var(--pk-surface-alt);
+  color: #475569;
+  font-weight: 500;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.z-th-content {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.z-tr {
+  border-bottom: 1px solid var(--pk-border);
+  transition: background-color var(--pk-transition-normal);
+}
+
+.z-tr:hover {
+  background-color: var(--pk-surface-alt);
+}
+
+.z-tr:last-child {
+  border-bottom: none;
+}
+
+.z-td {
+  padding: 14px 16px;
+  font-size: 14px;
+}
+
+/* Status badges (used across pages) */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--pk-radius-full);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-active  { background: var(--pk-success-bg); color: #166534; }
+.status-pending { background: #fef08a; color: #854d0e; }

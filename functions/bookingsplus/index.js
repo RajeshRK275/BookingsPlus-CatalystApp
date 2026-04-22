@@ -5,38 +5,99 @@ const catalyst = require('zcatalyst-sdk-node');
 
 const app = express();
 
-// Middleware
+// ── Core Middleware ──
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
-// Catalyst Initialization Middleware
+// ── Catalyst SDK Initialization ──
 app.use((req, res, next) => {
-    // Initialize Catalyst App for every request
-    req.catalystApp = catalyst.initialize(req);
+    // In dev mode, if catalystApp is already injected (by dev-server.js), skip SDK init
+    if (req.catalystApp) {
+        return next();
+    }
+    try {
+        req.catalystApp = catalyst.initialize(req);
+    } catch (err) {
+        // In local dev, Catalyst SDK init fails — use a no-op placeholder
+        console.error('Catalyst SDK init failed (expected in local dev):', err.message);
+        return res.status(500).json({ success: false, message: 'Catalyst SDK not available. Use dev-server.js for local development.' });
+    }
     next();
 });
 
-// Import Routes
+// ── Import Middleware ──
+const authMiddleware = require('./middleware/auth.middleware');
+const workspaceMiddleware = require('./middleware/workspace.middleware');
+const superAdminGuard = require('./middleware/superadmin.middleware');
+
+// ── Import Routes ──
+// Auth (no workspace scope needed)
 const authRoutes = require('./modules/auth/auth.routes');
+// Organization (auth only, no workspace scope)
 const organizationsRoutes = require('./modules/organizations/organizations.routes');
+// Workspaces (auth only, no workspace scope)
+const workspacesRoutes = require('./modules/workspaces/workspaces.routes');
+// Workspace-scoped routes (auth + workspace)
 const usersRoutes = require('./modules/users/users.routes');
 const servicesRoutes = require('./modules/services/services.routes');
 const appointmentsRoutes = require('./modules/appointments/appointments.routes');
+// Admin routes (auth + super admin)
+const adminWorkspacesRoutes = require('./modules/admin/admin.workspaces.routes');
+const adminUsersRoutes = require('./modules/admin/admin.users.routes');
+const adminRolesRoutes = require('./modules/admin/admin.roles.routes');
+const adminPermissionsRoutes = require('./modules/admin/admin.permissions.routes');
+const adminAuditRoutes = require('./modules/admin/admin.audit.routes');
+const adminWebhookRoutes = require('./modules/admin/admin.webhook.routes');
 
+// ═══════════════════════════════════════════════════
 // API V1 Routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/organizations', organizationsRoutes);
-app.use('/api/v1/users', usersRoutes);
-app.use('/api/v1/services', servicesRoutes);
-app.use('/api/v1/appointments', appointmentsRoutes);
+// ═══════════════════════════════════════════════════
 
-// Error Handling Middleware
+// Auth — no workspace scope needed (handles /me, /me/permissions)
+app.use('/api/v1/auth', authRoutes);
+
+// Organization — auth only (setup, get org details)
+app.use('/api/v1/organizations', organizationsRoutes);
+
+// Workspaces — auth only (list user's workspaces, get workspace details)
+app.use('/api/v1/workspaces', workspacesRoutes);
+
+// Workspace-scoped routes — auth + workspace middleware
+app.use('/api/v1/users', authMiddleware, workspaceMiddleware, usersRoutes);
+app.use('/api/v1/services', authMiddleware, workspaceMiddleware, servicesRoutes);
+app.use('/api/v1/appointments', authMiddleware, workspaceMiddleware, appointmentsRoutes);
+
+// Admin routes — auth + super admin guard
+app.use('/api/v1/admin/workspaces', authMiddleware, superAdminGuard, adminWorkspacesRoutes);
+app.use('/api/v1/admin/users', authMiddleware, superAdminGuard, adminUsersRoutes);
+app.use('/api/v1/admin/roles', authMiddleware, superAdminGuard, adminRolesRoutes);
+app.use('/api/v1/admin/permissions', authMiddleware, superAdminGuard, adminPermissionsRoutes);
+app.use('/api/v1/admin/audit', authMiddleware, superAdminGuard, adminAuditRoutes);
+
+// Admin webhook — protected by X-Admin-Secret header (NOT Catalyst auth)
+app.use('/api/v1/admin/webhook', adminWebhookRoutes);
+
+// ── Centralized Error Handler ──
+const { AppError } = require('./core/errors');
+
 app.use((err, req, res, next) => {
-    console.error('Unhandled Server Error: ', err);
+    // Operational errors (thrown intentionally by our code)
+    if (err instanceof AppError) {
+        return res.status(err.statusCode).json({
+            success: false,
+            message: err.message,
+            code: err.code,
+            ...(err.details ? { details: err.details } : {}),
+        });
+    }
+
+    // Unexpected errors
+    console.error('Unhandled Server Error:', err);
     res.status(err.status || 500).json({
         success: false,
-        message: err.message || 'Internal Server Error'
+        message: process.env.DEV_MODE === 'true' ? err.message : 'Internal Server Error',
+        code: 'INTERNAL_ERROR',
     });
 });
 

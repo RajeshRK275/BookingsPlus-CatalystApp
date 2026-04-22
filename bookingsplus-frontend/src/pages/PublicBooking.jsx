@@ -195,7 +195,7 @@ const PublicBooking = () => {
                     )}
 
                     <div style={{ padding: '8px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', backgroundColor: 'white', fontSize: '12px', fontWeight: 600, color: '#4B5563', display: 'inline-block', marginBottom: '16px' }}>
-                        DEMO ORGANIZATION
+                        BOOKINGS+
                     </div>
                     
                     <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '16px', lineHeight: '1.2' }}>{service.name}</h1>

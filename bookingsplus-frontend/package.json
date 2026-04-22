@@ -4,9 +4,6 @@
   "private": true,
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
-    "@testing-library/jest-dom": "^5.17.0",
-    "@testing-library/react": "^11.2.7",
-    "@testing-library/user-event": "^12.8.3",
     "axios": "^1.13.6",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -18,7 +15,6 @@
     "react-router-dom": "^7.13.1",
     "react-scripts": "5.0.1",
     "recharts": "^3.8.1",
-    "web-vitals": "^1.1.2",
     "zcatalyst-cli-plugin-react": "^0.0.4"
   },
   "scripts": {
@@ -29,8 +25,7 @@
   },
   "eslintConfig": {
     "extends": [
-      "react-app",
-      "react-app/jest"
+      "react-app"
     ]
   },
   "browserslist": {

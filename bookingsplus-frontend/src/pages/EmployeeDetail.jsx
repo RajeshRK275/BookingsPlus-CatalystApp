@@ -3,10 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Share2, Trash2, ArrowLeft, Pencil, Plus, Check, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import axios from 'axios';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 
 const EmployeeDetail = () => {
     const { employeeId } = useParams();
     const navigate = useNavigate();
+    const { activeWorkspace } = useWorkspace();
+    const wsSlug = activeWorkspace?.workspace_slug || '';
     const [activeTab, setActiveTab] = useState('Profile');
     const [assignedServices, setAssignedServices] = useState([]);
     
@@ -119,7 +122,7 @@ const EmployeeDetail = () => {
             <div style={{ display: 'flex', flexDirection: 'column', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <button onClick={() => navigate('/employees')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                        <button onClick={() => navigate(`/ws/${wsSlug}/employees`)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                             <ArrowLeft size={18} color="var(--pk-text-main)" />
                         </button>
                         <h1 style={{ fontSize: '20px', fontWeight: 600 }}>{emp.name}</h1>
@@ -197,11 +200,10 @@ const EmployeeDetail = () => {
                                 <div style={{ display: 'inline-block', backgroundColor: '#DCFCE7', color: '#166534', fontSize: '12px', padding: '2px 10px', borderRadius: '4px', fontWeight: 500 }}>Active</div>
                             </div>
                             <div>
-                                <div style={{ fontSize: '12px', color: 'var(--pk-text-muted)', marginBottom: '6px' }}>Workspace</div>
+                                <div style={{ fontSize: '12px', color: 'var(--pk-text-muted)', marginBottom: '6px' }}>Organization</div>
                                 <div style={{ display: 'flex', gap: '8px' }}>
-                                    <div style={{ backgroundColor: '#C4B5FD', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', color: '#4C1D95', fontWeight: 600 }}>JI</div>
-                                    <div style={{ backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', color: 'var(--pk-text-main)', fontWeight: 500 }}>JINS</div>
-                                    <div style={{ backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', color: 'var(--pk-text-main)', fontWeight: 500 }}>+2</div>
+                                    <div style={{ backgroundColor: '#C4B5FD', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', color: '#4C1D95', fontWeight: 600 }}>B+</div>
+                                    <div style={{ backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', color: 'var(--pk-text-main)', fontWeight: 500 }}>Bookings+</div>
                                 </div>
                             </div>
                         </div>
@@ -300,7 +302,7 @@ const EmployeeDetail = () => {
                         </div>
                         {assignedServices.map(service => (
                             <div key={service.id || service.service_id} 
-                                onClick={() => navigate(`/services/${service.id || service.service_id}`)}
+                                onClick={() => navigate(`/ws/${wsSlug}/services/${service.id || service.service_id}`)}
                                 style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.5fr', padding: '16px 24px', borderBottom: '1px solid #F3F4F6', alignItems: 'center', cursor: 'pointer', backgroundColor: 'white', transition: 'background-color 0.15s' }}
                                 onMouseEnter={e => e.currentTarget.style.backgroundColor = '#FAFAFA'}
                                 onMouseLeave={e => e.currentTarget.style.backgroundColor = 'white'}
