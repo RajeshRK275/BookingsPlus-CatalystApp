@@ -3,7 +3,7 @@ import { Bell, Calendar, User, Settings, CheckSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 
-const Topbar = () => {
+const Topbar = ({ onToggleNotifications, notificationCount }) => {
     const { user } = useAuth();
 
     return (
@@ -20,8 +20,19 @@ const Topbar = () => {
                 <Link to="/calendar" style={{ textDecoration: 'none', color: 'inherit', display: 'flex' }}>
                     <button className="icon-btn" title="Calendar"><Calendar size={20} /></button>
                 </Link>
-                <button className="icon-btn" title="Notifications"><Bell size={20} /></button>
-                <button className="icon-btn" title="Settings"><Settings size={20} /></button>
+                <button
+                    className="icon-btn notif-bell-btn"
+                    title="Notifications"
+                    onClick={onToggleNotifications}
+                >
+                    <Bell size={20} />
+                    {notificationCount > 0 && (
+                        <span className="notif-bell-badge">{notificationCount}</span>
+                    )}
+                </button>
+                <Link to="/settings" style={{ textDecoration: 'none', color: 'inherit', display: 'flex' }}>
+                    <button className="icon-btn" title="Settings"><Settings size={20} /></button>
+                </Link>
                 <div className="user-profile" title={user?.name}>
                     <User size={18} />
                 </div>

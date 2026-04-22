@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Calendar, Users, Grid, Settings, Briefcase, Bell, ChevronDown, CheckSquare, Search } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, Grid, Settings, Briefcase, ChevronDown, CheckSquare, Search } from 'lucide-react';
 
 const navItems = [
     { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -8,7 +8,6 @@ const navItems = [
     { label: 'Services', path: '/services', icon: Grid },
     { label: 'Employees', path: '/employees', icon: Briefcase },
     { label: 'Customers', path: '/customers', icon: Users },
-    { label: 'Notifications', path: '/notifications', icon: Bell },
     { label: 'Settings', path: '/settings', icon: Settings },
 ];
 

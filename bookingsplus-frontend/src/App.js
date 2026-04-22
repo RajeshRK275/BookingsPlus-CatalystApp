@@ -10,6 +10,7 @@ import Appointments from './pages/Appointments';
 import Calendar from './pages/Calendar';
 import Employees from './pages/Employees';
 import EmployeeDetail from './pages/EmployeeDetail';
+import Settings from './pages/Settings';
 
 // Query Client for API caching
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -37,6 +38,7 @@ function App() {
                             <Route path="/employees" element={<Employees />} />
                             <Route path="/employees/:employeeId" element={<EmployeeDetail />} />
                             <Route path="/customers" element={<div>Customers Page Placeholder</div>} />
+                            <Route path="/settings" element={<Settings />} />
                         </Route>
                     </Routes>
                 </AuthProvider>
