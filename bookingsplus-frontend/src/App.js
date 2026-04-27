@@ -12,7 +12,9 @@ import Appointments from './pages/Appointments';
 import Calendar from './pages/Calendar';
 import Employees from './pages/Employees';
 import EmployeeDetail from './pages/EmployeeDetail';
+import Customers from './pages/Customers';
 import Settings from './pages/Settings';
+import Onboarding from './pages/Onboarding';
 
 // Query Client for API caching
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -24,24 +26,39 @@ const queryClient = new QueryClient({
 });
 
 /**
- * RootRedirect — Redirects / to /ws/:defaultWorkspaceSlug
+ * LoadingScreen — Shared loading spinner for route transitions
+ */
+const LoadingScreen = () => (
+    <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh',
+        fontFamily: "'Inter', -apple-system, sans-serif", backgroundColor: '#F9FAFB',
+    }}>
+        <div style={{ textAlign: 'center' }}>
+            <div style={{
+                width: '40px', height: '40px', border: '3px solid #E5E7EB', borderTopColor: '#5C44B5',
+                borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px',
+            }} />
+            <p style={{ color: '#6B7280', fontSize: '14px' }}>Loading...</p>
+        </div>
+    </div>
+);
+
+/**
+ * RootRedirect — Redirects / to the correct destination:
+ * - If needs onboarding (super admin, no org) → /setup
+ * - If has workspace → /ws/:slug
+ * - Non-admins without workspace → friendly message
  */
 const RootRedirect = () => {
     const { activeWorkspace, loading: wsLoading } = useWorkspace();
-    const { loading: authLoading, needsOnboarding } = useAuth();
+    const { loading: authLoading, needsOnboarding, user } = useAuth();
 
     if (authLoading || wsLoading) {
-        return (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <div style={{ width: '40px', height: '40px', border: '3px solid #E5E7EB', borderTopColor: '#5C44B5', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
-                    <p style={{ color: '#6B7280', fontSize: '14px' }}>Loading...</p>
-                </div>
-            </div>
-        );
+        return <LoadingScreen />;
     }
 
-    if (needsOnboarding) {
+    // Only super admins who haven't set up the org go to /setup
+    if (needsOnboarding && user?.is_super_admin) {
         return <Navigate to="/setup" replace />;
     }
 
@@ -49,76 +66,73 @@ const RootRedirect = () => {
         return <Navigate to={`/ws/${activeWorkspace.workspace_slug}`} replace />;
     }
 
-    return <Navigate to="/setup" replace />;
-};
-
-/**
- * SetupPage — Simple placeholder for onboarding. Will be enhanced later.
- */
-const SetupPage = () => {
-    const { user } = useAuth();
-    const [orgName, setOrgName] = React.useState('');
-    const [wsName, setWsName] = React.useState('');
-    const [submitting, setSubmitting] = React.useState(false);
-    const [done, setDone] = React.useState(false);
-
-    const handleSetup = async (e) => {
-        e.preventDefault();
-        if (!orgName) return;
-        setSubmitting(true);
-        try {
-            const axios = (await import('axios')).default;
-            await axios.post('/server/bookingsplus/api/v1/organizations/setup', {
-                organization_name: orgName,
-                workspace_name: wsName || orgName,
-            });
-            setDone(true);
-            setTimeout(() => window.location.reload(), 1500);
-        } catch (err) {
-            alert('Setup failed: ' + (err.response?.data?.message || err.message));
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    if (done) {
+    // If not super admin and no workspace, show a friendly message
+    if (needsOnboarding && !user?.is_super_admin) {
         return (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <div style={{ width: '64px', height: '64px', backgroundColor: '#DCFCE7', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                    </div>
-                    <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>Setup Complete!</h2>
-                    <p style={{ color: '#6B7280' }}>Redirecting to your workspace...</p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: "'Inter', sans-serif" }}>
+                <div style={{ textAlign: 'center', maxWidth: '400px', padding: '40px' }}>
+                    <h2 style={{ fontSize: '20px', marginBottom: '12px' }}>Workspace Not Ready</h2>
+                    <p style={{ color: '#6B7280', fontSize: '14px', lineHeight: '1.6' }}>
+                        Your organization hasn't been set up yet. Please contact your administrator to complete the setup.
+                    </p>
                 </div>
             </div>
         );
     }
 
-    return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif', backgroundColor: '#F9FAFB' }}>
-            <div style={{ width: '100%', maxWidth: '480px', backgroundColor: 'white', borderRadius: '16px', padding: '40px', border: '1px solid #E5E7EB', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
-                <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px', textAlign: 'center' }}>Welcome to Bookings+</h1>
-                <p style={{ color: '#6B7280', textAlign: 'center', marginBottom: '32px' }}>
-                    Let's set up your organization, {user?.name || 'Admin'}.
-                </p>
-                <form onSubmit={handleSetup}>
-                    <div style={{ marginBottom: '20px' }}>
-                        <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Organization Name *</label>
-                        <input type="text" required value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Acme Education Group" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #D1D5DB', fontSize: '15px', outline: 'none' }} />
-                    </div>
-                    <div style={{ marginBottom: '24px' }}>
-                        <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>First Workspace Name</label>
-                        <input type="text" value={wsName} onChange={e => setWsName(e.target.value)} placeholder={orgName || 'Main Branch'} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #D1D5DB', fontSize: '15px', outline: 'none' }} />
-                        <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>Defaults to organization name if left empty.</p>
-                    </div>
-                    <button type="submit" disabled={submitting} style={{ width: '100%', padding: '12px', backgroundColor: '#5C44B5', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1 }}>
-                        {submitting ? 'Setting up...' : 'Create Organization'}
-                    </button>
-                </form>
+    return <Navigate to="/setup" replace />;
+};
+
+/**
+ * OnboardingGuard — Shows the onboarding wizard ONLY for super admins
+ * who haven't completed organization setup yet.
+ * 
+ * Non-admin users are NEVER shown the onboarding wizard.
+ * They get a friendly message asking them to contact their admin.
+ */
+const OnboardingGuard = () => {
+    const { loading: authLoading, needsOnboarding, setupCompleted, user } = useAuth();
+    const { activeWorkspace, loading: wsLoading } = useWorkspace();
+
+    if (authLoading || wsLoading) {
+        return <LoadingScreen />;
+    }
+
+    // Non-super-admins should NEVER see the onboarding wizard
+    if (!user?.is_super_admin) {
+        if (activeWorkspace?.workspace_slug) {
+            return <Navigate to={`/ws/${activeWorkspace.workspace_slug}`} replace />;
+        }
+        return (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: "'Inter', sans-serif" }}>
+                <div style={{ textAlign: 'center', maxWidth: '400px', padding: '40px' }}>
+                    <h2 style={{ fontSize: '20px', marginBottom: '12px' }}>Workspace Not Ready</h2>
+                    <p style={{ color: '#6B7280', fontSize: '14px', lineHeight: '1.6' }}>
+                        Your organization hasn't been set up yet. Please contact your administrator to complete the setup.
+                    </p>
+                </div>
             </div>
-        </div>
-    );
+        );
+    }
+
+    // Super admin — org not created yet → show wizard
+    if (needsOnboarding) {
+        return <Onboarding />;
+    }
+
+    // Super admin — org exists but onboarding wizard wasn't completed fully
+    const onboardingDone = localStorage.getItem('bp_onboarding_completed') === 'true';
+    if (setupCompleted && !onboardingDone) {
+        return <Onboarding />;
+    }
+
+    // Everything is set up — go to dashboard
+    if (setupCompleted && activeWorkspace?.workspace_slug) {
+        return <Navigate to={`/ws/${activeWorkspace.workspace_slug}`} replace />;
+    }
+
+    // Fallback: show wizard for super admin
+    return <Onboarding />;
 };
 
 /**
@@ -144,7 +158,9 @@ function AppRoutes() {
         <Routes>
             {/* Public routes (no auth/workspace needed) */}
             <Route path="/book/:serviceId" element={<PublicBooking />} />
-            <Route path="/setup" element={<SetupPage />} />
+
+            {/* Onboarding wizard — full-screen multi-step setup */}
+            <Route path="/setup" element={<OnboardingGuard />} />
 
             {/* Root redirect */}
             <Route path="/" element={<RootRedirect />} />
@@ -164,7 +180,7 @@ function AppRoutes() {
                 <Route path="services" element={<Services />} />
                 <Route path="employees" element={<Employees />} />
                 <Route path="employees/:employeeId" element={<EmployeeDetail />} />
-                <Route path="customers" element={<div style={{ padding: '40px' }}><h1>Customers Page</h1><p style={{ color: '#6B7280' }}>Coming soon.</p></div>} />
+                <Route path="customers" element={<Customers />} />
                 <Route path="settings" element={<Settings />} />
             </Route>
 

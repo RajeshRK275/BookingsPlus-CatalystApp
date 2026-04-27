@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Share2, Trash2, ArrowLeft, Pencil, Plus, Check, X } from 'lucide-react';
 import { Button } from '../ui/Button';
-import axios from 'axios';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { usersApi, servicesApi } from '../services';
 
 const EmployeeDetail = () => {
     const { employeeId } = useParams();
@@ -22,24 +22,21 @@ const EmployeeDetail = () => {
     useEffect(() => {
         const fetchEmployee = async () => {
             try {
-                const response = await axios.get('/server/bookingsplus/api/v1/users');
-                
+                const response = await usersApi.getAll();
                 if (response.data && response.data.success) {
-                    const found = response.data.data.find(e => String(e.id || e.user_id) === String(employeeId));
+                    const allEmps = (response.data.data || []).map(e => ({
+                        ...e,
+                        name: e.name || e.display_name || 'Unknown',
+                        id: e.id || e.user_id || e.ROWID,
+                    }));
+                    const found = allEmps.find(e => String(e.id) === String(employeeId) || String(e.user_id) === String(employeeId));
                     if (found) {
                         setEmp(found);
                         setEditForm(found);
                     }
                 }
             } catch (err) {
-                console.error('Error fetching employee from Catalyst:', err);
-                // Fallback for UI visualization
-                const fallbackEmps = JSON.parse(localStorage.getItem('bp_employees') || '[]');
-                const found = fallbackEmps.find(e => String(e.id) === String(employeeId));
-                if (found) {
-                    setEmp(found);
-                    setEditForm(found);
-                }
+                console.error('Error fetching employee:', err.message || err);
             } finally {
                 setLoading(false);
             }
@@ -47,20 +44,17 @@ const EmployeeDetail = () => {
 
         const fetchServices = async () => {
             try {
-                const response = await axios.get('/server/bookingsplus/api/v1/services');
-                
+                const response = await servicesApi.getAll();
                 if (response.data && response.data.success) {
-                    const services = response.data.data;
-                    const assigned = services.filter(s => {
-                        // Advanced I/O data format parsing
-                        return true; // Simplify for now pending ServiceStaff join logic in React
-                    });
-                    setAssignedServices(assigned);
+                    const services = (response.data.data || []).map(s => ({
+                        ...s,
+                        name: s.name || s.service_name || 'Untitled',
+                        id: s.id || s.service_id || s.ROWID,
+                    }));
+                    setAssignedServices(services);
                 }
             } catch (err) {
-                // Fallback
-                const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-                setAssignedServices(services);
+                console.error('Error fetching services:', err.message || err);
             }
         };
 
@@ -71,23 +65,13 @@ const EmployeeDetail = () => {
     const handleSave = async () => {
         try {
             const targetId = emp.id || emp.user_id;
-
-            // Attempt Catalyst update
-            await axios.put(`/server/bookingsplus/api/v1/users/${targetId}`, editForm);
-
+            await usersApi.update(targetId, editForm);
             setEmp({ ...editForm });
             setIsEditing(false);
         } catch (err) {
-            console.error('Error updating employee in Catalyst:', err);
-            // Fallback for UI if Datastore strictly fails
-            const fallbackEmps = JSON.parse(localStorage.getItem('bp_employees') || '[]');
-            const idx = fallbackEmps.findIndex(e => String(e.id) === String(emp.id || emp.user_id));
-            if (idx > -1) {
-                fallbackEmps[idx] = { ...editForm };
-                localStorage.setItem('bp_employees', JSON.stringify(fallbackEmps));
-            }
-            setEmp({ ...editForm });
-            setIsEditing(false);
+            const errorMsg = err.data?.message || err.message || 'Failed to update employee';
+            console.error('Error updating employee:', errorMsg);
+            alert(`Error updating employee: ${errorMsg}`);
         }
     };
 

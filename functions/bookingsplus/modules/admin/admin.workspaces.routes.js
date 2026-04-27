@@ -1,9 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const { getDatastore, executeZCQL, insertAuditLog } = require('../../utils/datastore');
+const { getDatastore, executeZCQL, insertAuditLog, catalystDateTime } = require('../../utils/datastore');
 const { seedRolesForWorkspace } = require('../../utils/seed-roles');
 
 // All routes guarded by superAdminGuard in index.js
+
+/** Coerce any value to a safe BIGINT-compatible number for Catalyst Data Store */
+const toBigInt = (value) => {
+    if (value === null || value === undefined) return Date.now();
+    if (typeof value === 'number' && !isNaN(value)) return value;
+    const parsed = parseInt(String(value), 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+    return Date.now();
+};
 
 // GET / — List all workspaces
 router.get('/', async (req, res, next) => {
@@ -33,6 +42,8 @@ router.post('/', async (req, res, next) => {
         }
 
         const datastore = getDatastore(req);
+        // created_by is BIGINT — must be numeric, not 'temp-xxx' strings
+        const createdByUserId = toBigInt(req.user.ROWID || req.user.user_id);
         const wsRow = await datastore.table('Workspaces').insertRow({
             workspace_id: Date.now(),
             workspace_name,
@@ -40,22 +51,22 @@ router.post('/', async (req, res, next) => {
             description: description || '',
             brand_color: brand_color || '#5C44B5',
             status: 'active',
-            created_by: req.user.user_id,
-            created_at: new Date().toISOString(),
+            created_by: createdByUserId,
+            created_at: catalystDateTime(),
         });
 
         // Seed default roles
         const roleMap = await seedRolesForWorkspace(req, wsRow.ROWID);
 
-        // Add creator as Owner
+        // Add creator as Owner — all _id columns are BIGINT
         const ownerRoleId = roleMap['Owner'];
         await datastore.table('UserWorkspaces').insertRow({
             user_workspace_id: Date.now() + 1,
-            user_id: req.user.user_id || req.user.ROWID,
-            workspace_id: wsRow.ROWID,
-            role_id: ownerRoleId,
+            user_id: toBigInt(req.user.ROWID || req.user.user_id),
+            workspace_id: toBigInt(wsRow.ROWID),
+            role_id: toBigInt(ownerRoleId),
             status: 'active',
-            joined_at: new Date().toISOString(),
+            joined_at: catalystDateTime(),
         });
 
         await insertAuditLog(req, {

@@ -30,6 +30,7 @@ app.use((req, res, next) => {
 const authMiddleware = require('./middleware/auth.middleware');
 const workspaceMiddleware = require('./middleware/workspace.middleware');
 const superAdminGuard = require('./middleware/superadmin.middleware');
+const webhookAuth = require('./middleware/webhook.middleware');
 
 // ── Import Routes ──
 // Auth (no workspace scope needed)
@@ -42,6 +43,7 @@ const workspacesRoutes = require('./modules/workspaces/workspaces.routes');
 const usersRoutes = require('./modules/users/users.routes');
 const servicesRoutes = require('./modules/services/services.routes');
 const appointmentsRoutes = require('./modules/appointments/appointments.routes');
+const customersRoutes = require('./modules/customers/customers.routes');
 // Admin routes (auth + super admin)
 const adminWorkspacesRoutes = require('./modules/admin/admin.workspaces.routes');
 const adminUsersRoutes = require('./modules/admin/admin.users.routes');
@@ -49,6 +51,7 @@ const adminRolesRoutes = require('./modules/admin/admin.roles.routes');
 const adminPermissionsRoutes = require('./modules/admin/admin.permissions.routes');
 const adminAuditRoutes = require('./modules/admin/admin.audit.routes');
 const adminWebhookRoutes = require('./modules/admin/admin.webhook.routes');
+const adminMigrateRoutes = require('./modules/admin/admin.migrate.routes');
 
 // ═══════════════════════════════════════════════════
 // API V1 Routes
@@ -67,6 +70,7 @@ app.use('/api/v1/workspaces', workspacesRoutes);
 app.use('/api/v1/users', authMiddleware, workspaceMiddleware, usersRoutes);
 app.use('/api/v1/services', authMiddleware, workspaceMiddleware, servicesRoutes);
 app.use('/api/v1/appointments', authMiddleware, workspaceMiddleware, appointmentsRoutes);
+app.use('/api/v1/customers', authMiddleware, workspaceMiddleware, customersRoutes);
 
 // Admin routes — auth + super admin guard
 app.use('/api/v1/admin/workspaces', authMiddleware, superAdminGuard, adminWorkspacesRoutes);
@@ -77,6 +81,9 @@ app.use('/api/v1/admin/audit', authMiddleware, superAdminGuard, adminAuditRoutes
 
 // Admin webhook — protected by X-Admin-Secret header (NOT Catalyst auth)
 app.use('/api/v1/admin/webhook', adminWebhookRoutes);
+
+// Admin migration tool — protected by X-Admin-Secret header (same auth as webhook)
+app.use('/api/v1/admin/migrate-datastore', webhookAuth, adminMigrateRoutes);
 
 // ── Centralized Error Handler ──
 const { AppError } = require('./core/errors');
@@ -92,12 +99,42 @@ app.use((err, req, res, next) => {
         });
     }
 
-    // Unexpected errors
-    console.error('Unhandled Server Error:', err);
-    res.status(err.status || 500).json({
+    // ── All other errors — ALWAYS pass through the real message ──
+    // Users/admins need actionable error messages. Hiding them behind
+    // "Internal Server Error" makes debugging impossible.
+    console.error('Unhandled Server Error:', err.stack || err);
+
+    const errMessage = err.message || 'An unexpected error occurred';
+    let userMessage = errMessage;
+    let errorCode = 'INTERNAL_ERROR';
+    let statusCode = err.status || err.statusCode || 500;
+    const lowerMsg = errMessage.toLowerCase();
+
+    // Classify common Catalyst Data Store errors for actionable messages
+    if (lowerMsg.includes('mandatory') && (lowerMsg.includes('column') || lowerMsg.includes('empty'))) {
+        userMessage = `Database configuration error: ${errMessage}. Please verify all required columns exist and are correctly configured in the Catalyst Data Store console.`;
+        errorCode = 'DATASTORE_CONFIG_ERROR';
+    } else if (lowerMsg.includes('invalid input value for column') || lowerMsg.includes('invalid column')) {
+        userMessage = `Database schema mismatch: ${errMessage}. A required column may be missing or misconfigured in the Data Store.`;
+        errorCode = 'DATASTORE_SCHEMA_ERROR';
+    } else if (lowerMsg.includes('does not exist') && (lowerMsg.includes('table') || lowerMsg.includes('relation'))) {
+        userMessage = `Database table missing: ${errMessage}. Please create all required tables in the Catalyst Data Store console.`;
+        errorCode = 'DATASTORE_TABLE_MISSING';
+    } else if (lowerMsg.includes('no such table') || lowerMsg.includes('unknown table')) {
+        userMessage = `Database table not found: ${errMessage}. Ensure the table has been created in Catalyst Data Store.`;
+        errorCode = 'DATASTORE_TABLE_MISSING';
+    } else if (lowerMsg.includes('network') || lowerMsg.includes('econnrefused') || lowerMsg.includes('timeout') || lowerMsg.includes('econnreset')) {
+        userMessage = `Service connectivity issue: ${errMessage}. Please try again in a moment.`;
+        errorCode = 'SERVICE_UNAVAILABLE';
+        statusCode = 503;
+    } else if (lowerMsg.includes('setup failed')) {
+        errorCode = 'SETUP_ERROR';
+    }
+
+    res.status(statusCode).json({
         success: false,
-        message: process.env.DEV_MODE === 'true' ? err.message : 'Internal Server Error',
-        code: 'INTERNAL_ERROR',
+        message: userMessage,
+        code: errorCode,
     });
 });
 

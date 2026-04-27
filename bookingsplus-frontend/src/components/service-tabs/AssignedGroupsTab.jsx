@@ -1,14 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, X } from 'lucide-react';
 import { Button } from '../../ui/Button';
-
-const MOCK_STAFF = [
-    { id: 1, name: 'Jason Miller' },
-    { id: 2, name: 'Emily Carter' },
-    { id: 3, name: 'Michael Thompson' },
-    { id: 4, name: 'Sarah Johnson' },
-    { id: 5, name: 'David Wilson' }
-];
+import { usersApi } from '../../services';
 
 const getInitials = (name) => name.split(' ').map(w => w[0]).join('').toUpperCase();
 
@@ -16,8 +9,26 @@ const AssignedGroupsTab = ({ service, onUpdate }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState(service.assignedStaff || []);
     const [searchQuery, setSearchQuery] = useState('');
+    const [allStaff, setAllStaff] = useState([]);
 
-    const filteredStaff = MOCK_STAFF.filter(s =>
+    useEffect(() => {
+        const fetchStaff = async () => {
+            try {
+                const res = await usersApi.getAll();
+                if (res.data?.success) {
+                    setAllStaff((res.data.data || []).map(e => ({
+                        id: e.id || e.user_id || e.ROWID,
+                        name: e.name || e.display_name || 'Unknown',
+                    })));
+                }
+            } catch (err) {
+                console.error('Error fetching staff:', err.message || err);
+            }
+        };
+        fetchStaff();
+    }, []);
+
+    const filteredStaff = allStaff.filter(s =>
         s.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
@@ -37,7 +48,7 @@ const AssignedGroupsTab = ({ service, onUpdate }) => {
         setIsEditing(false);
     };
 
-    const assignedStaffList = MOCK_STAFF.filter(s => selectedStaff.includes(s.id));
+    const assignedStaffList = allStaff.filter(s => selectedStaff.includes(s.id));
 
     if (isEditing) {
         return (

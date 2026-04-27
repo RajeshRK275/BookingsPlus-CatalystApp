@@ -6,48 +6,45 @@ import WeekView from '../components/calendar/WeekView';
 import MonthView from '../components/calendar/MonthView';
 import AddAppointmentModal from '../components/calendar/AddAppointmentModal';
 import { format, addDays, subDays, startOfWeek, endOfWeek, addWeeks, subWeeks, addMonths, subMonths } from 'date-fns';
-import axios from 'axios';
-
-const MOCK_STAFF = [
-    { id: 1, name: 'Jason Miller' },
-    { id: 2, name: 'Emily Carter' },
-    { id: 3, name: 'Michael Thompson' },
-    { id: 4, name: 'Sarah Johnson' },
-    { id: 5, name: 'David Wilson' }
-];
+import { appointmentsApi, usersApi } from '../services';
 
 const CalendarPage = () => {
     const { user } = useAuth();
     const [activeView, setActiveView] = useState('Day');
     const [currentDate, setCurrentDate] = useState(new Date());
     const [appointments, setAppointments] = useState([]);
+    const [staffList, setStaffList] = useState([]);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedSlot, setSelectedSlot] = useState(null); // { date, time, staffId }
 
     useEffect(() => {
-        const fetchAppointments = async () => {
-            try {
-                                const res = await axios.get('/server/bookingsplus/api/v1/appointments');
-                if (res.data && res.data.success) {
-                    setAppointments(res.data.data);
-                }
-            } catch (err) {
-                console.error('Error fetching appointments for calendar:', err);
-                const fallback = JSON.parse(localStorage.getItem('bp_appointments') || '[]');
-                setAppointments(fallback);
+        const fetchData = async () => {
+            const [aptRes, empRes] = await Promise.allSettled([
+                appointmentsApi.getAll(),
+                usersApi.getAll(),
+            ]);
+            if (aptRes.status === 'fulfilled' && aptRes.value.data?.success) {
+                setAppointments(aptRes.value.data.data || []);
+            }
+            if (empRes.status === 'fulfilled' && empRes.value.data?.success) {
+                setStaffList((empRes.value.data.data || []).map(e => ({
+                    id: e.id || e.user_id || e.ROWID,
+                    name: e.name || e.display_name || 'Unknown',
+                })));
             }
         };
-        fetchAppointments();
+        fetchData();
     }, []);
 
-    // Filter staff based on role. If admin, show top 3 for UI similarity to images, or all. 
-    // Image 1 shows: Michael, Emily, Jason, Emily (duplicate for some reason). Let's use first 3.
+    // Filter staff based on role. Admins see all staff; non-admins see only themselves.
     const displayStaff = useMemo(() => {
-        if (user?.role === 'Admin' || user?.role === 'Super Admin') {
-            return MOCK_STAFF.slice(0, 3);
+        if (staffList.length === 0) return [{ id: 0, name: user?.name || 'My Calendar' }];
+        if (user?.is_super_admin || user?.role === 'Admin' || user?.role === 'Super Admin') {
+            return staffList;
         }
-        return MOCK_STAFF.filter(s => s.name === user?.name) || [{ id: 99, name: user?.name || 'My Calendar' }];
-    }, [user]);
+        const myEntry = staffList.find(s => s.name === user?.name);
+        return myEntry ? [myEntry] : [{ id: 0, name: user?.name || 'My Calendar' }];
+    }, [user, staffList]);
 
     const handlePrev = () => {
         if (activeView === 'Day') setCurrentDate(subDays(currentDate, 1));
@@ -141,7 +138,7 @@ const CalendarPage = () => {
                     isOpen={isAddModalOpen} 
                     onClose={() => setIsAddModalOpen(false)} 
                     slotDetails={selectedSlot}
-                    staffList={MOCK_STAFF}
+                    staffList={staffList}
                     onAdded={handleAppointmentAdded}
                 />
             )}

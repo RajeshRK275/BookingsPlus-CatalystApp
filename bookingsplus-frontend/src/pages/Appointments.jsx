@@ -2,15 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Button } from '../ui/Button';
 import { Plus, Search, HelpCircle, Clock, Calendar } from 'lucide-react';
 import AddAppointmentModal from '../components/calendar/AddAppointmentModal';
-import axios from 'axios';
-
-const MOCK_STAFF = [
-    { id: 1, name: 'Jason Miller' },
-    { id: 2, name: 'Emily Carter' },
-    { id: 3, name: 'Michael Thompson' },
-    { id: 4, name: 'Sarah Johnson' },
-    { id: 5, name: 'David Wilson' }
-];
+import { appointmentsApi, usersApi } from '../services';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -56,24 +48,30 @@ const Appointments = () => {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
     const [appointments, setAppointments] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [staffList, setStaffList] = useState([]);
 
     useEffect(() => {
-        const fetchAppointments = async () => {
+        const fetchData = async () => {
             try {
-                                const res = await axios.get('/server/bookingsplus/api/v1/appointments');
-                if (res.data && res.data.success) {
-                    setAppointments(res.data.data);
+                const [aptRes, empRes] = await Promise.allSettled([
+                    appointmentsApi.getAll(),
+                    usersApi.getAll(),
+                ]);
+                if (aptRes.status === 'fulfilled' && aptRes.value.data?.success) {
+                    setAppointments(aptRes.value.data.data || []);
+                }
+                if (empRes.status === 'fulfilled' && empRes.value.data?.success) {
+                    setStaffList((empRes.value.data.data || []).map(e => ({
+                        id: e.id || e.user_id || e.ROWID,
+                        name: e.name || e.display_name || 'Unknown',
+                        email: e.email || '',
+                    })));
                 }
             } catch (err) {
-                console.error('Error fetching appointments:', err);
-                const fallback = JSON.parse(localStorage.getItem('bp_appointments') || '[]');
-                setAppointments(fallback);
-            } finally {
-                setLoading(false);
+                console.error('Error fetching data:', err.message || err);
             }
         };
-        fetchAppointments();
+        fetchData();
     }, []);
 
     const handleAppointmentAdded = (newApt) => {
@@ -270,7 +268,7 @@ const Appointments = () => {
                 isOpen={isAddModalOpen} 
                 onClose={() => setIsAddModalOpen(false)} 
                 slotDetails={null}
-                staffList={MOCK_STAFF}
+                staffList={staffList}
                 onAdded={handleAppointmentAdded}
             />
         </div>

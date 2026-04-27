@@ -2,6 +2,17 @@
  * Seeds the Permissions table with all granular permission definitions.
  * Called once during organization setup (/setup endpoint).
  * Idempotent — checks if permissions already exist before inserting.
+ *
+ * IMPORTANT: The Permissions table columns MUST have these exact types:
+ *   - permission_id   → bigint
+ *   - permission_key  → varchar(100)  ← NOT bigint!
+ *   - resource        → varchar(50)
+ *   - action          → varchar(50)
+ *   - description     → varchar(255)
+ *
+ * If any varchar column is incorrectly created as bigint in the Catalyst
+ * Console, inserts will fail with "bigint value expected". To fix:
+ * Delete the column in the Console and re-create it with the correct type.
  */
 
 const PERMISSION_DEFINITIONS = [
@@ -36,9 +47,16 @@ const seedPermissions = async (req) => {
     const { getDatastore, executeZCQL } = require('./datastore');
 
     // Check if permissions are already seeded
-    const existing = await executeZCQL(req, 'SELECT COUNT(ROWID) as cnt FROM Permissions');
-    const count = existing[0]?.Permissions?.cnt || 0;
-    if (parseInt(count) > 0) {
+    let count = 0;
+    try {
+        const existing = await executeZCQL(req, 'SELECT COUNT(ROWID) as cnt FROM Permissions');
+        count = parseInt(existing[0]?.Permissions?.cnt || 0);
+    } catch (e) {
+        // Table might be empty or query fails — proceed with seeding
+        console.log('Permissions count check:', e.message);
+    }
+
+    if (count > 0) {
         console.log(`Permissions already seeded (${count} found). Skipping.`);
         return;
     }
@@ -46,18 +64,90 @@ const seedPermissions = async (req) => {
     const datastore = getDatastore(req);
     const table = datastore.table('Permissions');
 
-    for (let i = 0; i < PERMISSION_DEFINITIONS.length; i++) {
-        const p = PERMISSION_DEFINITIONS[i];
+    // Use base timestamp + offset to guarantee unique BIGINT IDs
+    const baseTs = Date.now();
+
+    // ── Insert first permission with detailed error handling ──
+    // This catches schema issues (wrong column types) early with clear messages
+    const firstPerm = PERMISSION_DEFINITIONS[0];
+    try {
         await table.insertRow({
-            permission_id: Date.now() + i,
-            permission_key: p.key,
-            resource: p.resource,
-            action: p.action,
-            description: p.desc,
+            permission_id: baseTs + 1,
+            permission_key: firstPerm.key,
+            resource: firstPerm.resource,
+            action: firstPerm.action,
+            description: firstPerm.desc,
         });
+    } catch (err) {
+        const errMsg = (err.message || '').toLowerCase();
+
+        // Detect the specific "bigint value expected" error — column type mismatch
+        if (errMsg.includes('bigint value expected') || errMsg.includes('invalid input value')) {
+            const { AppError } = require('../core/errors');
+
+            // Figure out which column is wrong
+            let wrongColumn = 'unknown';
+            const originalMsg = err.message || '';
+            for (const col of ['permission_key', 'resource', 'action', 'description']) {
+                if (originalMsg.toLowerCase().includes(col)) {
+                    wrongColumn = col;
+                    break;
+                }
+            }
+
+            throw new AppError(
+                `SCHEMA ERROR in "Permissions" table: Column "${wrongColumn}" is configured as BIGINT but must be VARCHAR.\n\n` +
+                `The column stores text values (e.g., "${firstPerm.key}"), not numbers.\n\n` +
+                `TO FIX (in Catalyst Console → Data Store → "Permissions" table → Schema View):\n` +
+                `  1. DELETE the "${wrongColumn}" column (click column → delete icon)\n` +
+                `  2. Click "+ New Column" → Name: "${wrongColumn}" → Type: "varchar" → Max Length: 100\n` +
+                `  3. Repeat for any other wrongly-typed columns.\n\n` +
+                `CORRECT column types for the Permissions table:\n` +
+                `  ┌───────────────────┬──────────────┐\n` +
+                `  │ Column            │ Type         │\n` +
+                `  ├───────────────────┼──────────────┤\n` +
+                `  │ permission_id     │ bigint       │\n` +
+                `  │ permission_key    │ varchar(100) │\n` +
+                `  │ resource          │ varchar(50)  │\n` +
+                `  │ action            │ varchar(50)  │\n` +
+                `  │ description       │ varchar(255) │\n` +
+                `  └───────────────────┴──────────────┘\n\n` +
+                `Original error: ${err.message}`,
+                422,
+                'SCHEMA_TYPE_MISMATCH'
+            );
+        }
+
+        // Unknown error — re-throw
+        throw err;
     }
 
-    console.log(`Seeded ${PERMISSION_DEFINITIONS.length} permissions successfully.`);
+    // First one succeeded — insert the rest
+    let successCount = 1;
+    const failures = [];
+
+    for (let i = 1; i < PERMISSION_DEFINITIONS.length; i++) {
+        const p = PERMISSION_DEFINITIONS[i];
+        try {
+            await table.insertRow({
+                permission_id: baseTs + i + 1,
+                permission_key: p.key,
+                resource: p.resource,
+                action: p.action,
+                description: p.desc,
+            });
+            successCount++;
+        } catch (err) {
+            console.error(`Failed to insert permission "${p.key}":`, err.message);
+            failures.push({ key: p.key, error: err.message });
+        }
+    }
+
+    if (failures.length > 0) {
+        console.warn(`Seeded ${successCount}/${PERMISSION_DEFINITIONS.length} permissions. ${failures.length} failed.`);
+    } else {
+        console.log(`Seeded all ${PERMISSION_DEFINITIONS.length} permissions successfully.`);
+    }
 };
 
 module.exports = { seedPermissions, PERMISSION_DEFINITIONS };

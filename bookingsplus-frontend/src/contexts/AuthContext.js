@@ -33,8 +33,33 @@ export const AuthProvider = ({ children }) => {
             }
         } catch (err) {
             console.error('Auth check failed:', err);
-            // In Catalyst deployed mode, a 401 means the user needs to log in.
-            // Catalyst embedded auth will handle the redirect automatically.
+
+            // Extract status and message from various error shapes
+            const status = err.status || err.response?.status;
+            const errMsg = err.data?.message || err.response?.data?.message || err.message || '';
+            const errCode = err.data?.code || err.response?.data?.code || '';
+
+            if (status === 401) {
+                // 401 — user not logged in. Catalyst embedded auth handles redirect.
+                setUser(null);
+                setIsAuthenticated(false);
+                return;
+            }
+
+            // Server errors (500/502/503) during auth check almost always mean:
+            // - Organization table is empty (first-time setup)
+            // - Data Store tables/columns are missing
+            // - Setup hasn't been completed
+            // Instead of showing a blank/broken screen, redirect to setup page.
+            if (status >= 500) {
+                console.warn(`Server error (${status}) during auth — showing setup page. Error: ${errMsg} [${errCode}]`);
+                setUser({ name: 'Admin', email: '', is_super_admin: true });
+                setIsAuthenticated(true);
+                setSetupCompleted(false);
+                return;
+            }
+
+            // Any other error — unauthenticated state
             setUser(null);
             setIsAuthenticated(false);
         }
@@ -57,6 +82,15 @@ export const AuthProvider = ({ children }) => {
         window.location.href = '/__catalyst/auth/login';
     }, []);
 
+    /**
+     * Mark setup as completed (called after org creation in the onboarding wizard).
+     * This allows the wizard to proceed to subsequent steps without
+     * needsOnboarding flipping back to false mid-flow.
+     */
+    const markSetupComplete = React.useCallback(() => {
+        setSetupCompleted(true);
+    }, []);
+
     return (
         <AuthContext.Provider value={{
             user,
@@ -66,6 +100,7 @@ export const AuthProvider = ({ children }) => {
             needsOnboarding: isAuthenticated && !setupCompleted,
             logout,
             refreshUser,
+            markSetupComplete,
         }}>
             {children}
         </AuthContext.Provider>

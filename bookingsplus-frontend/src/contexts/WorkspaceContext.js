@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
 import { useAuth } from './AuthContext';
 import { workspacesApi } from '../services';
 import { STORAGE_KEYS } from '../constants';
@@ -44,8 +43,8 @@ export const WorkspaceProvider = ({ children }) => {
                     : null;
                 const defaultWs = storedWs || workspaces[0];
                 setActiveWorkspace(defaultWs);
-                // Set axios default header
-                axios.defaults.headers.common['X-Workspace-Id'] = defaultWs.workspace_id;
+                // Store in localStorage — the API interceptor reads this for X-Workspace-Id header
+                localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE, String(defaultWs.workspace_id));
             }
             setLoading(false);
         };
@@ -56,7 +55,6 @@ export const WorkspaceProvider = ({ children }) => {
         const ws = userWorkspaces.find(w => String(w.workspace_id) === String(workspaceId));
         if (ws) {
             setActiveWorkspace(ws);
-            axios.defaults.headers.common['X-Workspace-Id'] = ws.workspace_id;
             localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE, String(ws.workspace_id));
         }
     }, [userWorkspaces]);

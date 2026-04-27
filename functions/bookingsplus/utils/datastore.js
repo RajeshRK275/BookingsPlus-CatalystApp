@@ -1,4 +1,19 @@
 // Helper wrapper to interact with Catalyst Datastore
+
+/**
+ * Catalyst Data Store datetime formatter.
+ * Catalyst datetime columns do NOT accept ISO 8601 format (with T and Z).
+ * They expect: "yyyy-MM-dd HH:mm:ss" (e.g., "2025-01-15 14:30:00").
+ * 
+ * @param {Date} [date] - Date to format (defaults to now)
+ * @returns {string} Catalyst-compatible datetime string
+ */
+const catalystDateTime = (date) => {
+    const d = date || new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
 const getDatastore = (req) => {
     return req.catalystApp.datastore();
 };
@@ -27,8 +42,17 @@ const executeWorkspaceScopedZCQL = async (req, query) => {
     return await executeZCQL(req, query);
 };
 
+/** Coerce to numeric BIGINT or 0 */
+const toBigIntSafe = (val) => {
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number' && !isNaN(val)) return val;
+    const p = parseInt(String(val), 10);
+    return (!isNaN(p) && p >= 0) ? p : 0;
+};
+
 /**
  * Audit log helper — inserts an entry into AuditLog table.
+ * workspace_id and user_id are BIGINT — must be numeric.
  */
 const insertAuditLog = async (req, { workspaceId, userId, action, resourceType, resourceId, details }) => {
     try {
@@ -37,14 +61,14 @@ const insertAuditLog = async (req, { workspaceId, userId, action, resourceType, 
 
         const datastore = getDatastore(req);
         await datastore.table('AuditLog').insertRow({
-            workspace_id: workspaceId || '',
-            user_id: userId || '',
+            workspace_id: toBigIntSafe(workspaceId),
+            user_id: toBigIntSafe(userId),
             action: action || '',
             resource_type: resourceType || '',
             resource_id: resourceId ? String(resourceId) : '',
             details_json: details ? JSON.stringify(details) : '{}',
             ip_address: req.ip || req.headers['x-forwarded-for'] || '',
-            created_at: new Date().toISOString()
+            created_at: catalystDateTime()
         });
     } catch (err) {
         console.error('Failed to insert audit log:', err.message);
@@ -55,5 +79,6 @@ module.exports = {
     getDatastore,
     executeZCQL,
     executeWorkspaceScopedZCQL,
-    insertAuditLog
+    insertAuditLog,
+    catalystDateTime
 };

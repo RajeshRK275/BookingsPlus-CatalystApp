@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const webhookAuth = require('../../middleware/webhook.middleware');
-const { getDatastore, executeZCQL, insertAuditLog } = require('../../utils/datastore');
+const { getDatastore, executeZCQL, insertAuditLog, catalystDateTime } = require('../../utils/datastore');
 
 /**
  * POST /role-sync — Admin App Webhook → Catalyst Role Sync
@@ -49,7 +49,7 @@ router.post('/role-sync', webhookAuth, async (req, res, next) => {
                 subscription_type: subscription_type || '',
                 assigned_by: assigned_by || 'admin',
                 role_version: newVersion,
-                updated_at: new Date().toISOString(),
+                updated_at: catalystDateTime(),
             });
         } else {
             await datastore.table('UserRoleMapping').insertRow({
@@ -60,7 +60,7 @@ router.post('/role-sync', webhookAuth, async (req, res, next) => {
                 subscription_type: subscription_type || '',
                 assigned_by: assigned_by || 'admin',
                 role_version: newVersion,
-                updated_at: new Date().toISOString(),
+                updated_at: catalystDateTime(),
             });
         }
 

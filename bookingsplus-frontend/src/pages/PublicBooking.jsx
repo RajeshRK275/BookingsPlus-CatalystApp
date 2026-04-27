@@ -1,13 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Clock, Calendar, Globe, ArrowLeft, Users } from 'lucide-react';
-import axios from 'axios';
+import { servicesApi, appointmentsApi } from '../services';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT_DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
-const getInitials = (name) => name ? name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : 'SV';
 
 const formatDuration = (mins) => {
     if (!mins) return '1 hr';
@@ -42,15 +40,18 @@ const PublicBooking = () => {
     useEffect(() => {
         const fetchService = async () => {
              try {
-                const response = await axios.get('/server/bookingsplus/api/v1/services');
+                const response = await servicesApi.getAll();
                 if (response.data && response.data.success) {
-                    const svc = response.data.data.find(s => String(s.id || s.service_id) === String(serviceId));
+                    const allSvcs = (response.data.data || []).map(s => ({
+                        ...s,
+                        name: s.name || s.service_name || 'Untitled',
+                        id: s.id || s.service_id || s.ROWID,
+                    }));
+                    const svc = allSvcs.find(s => String(s.id) === String(serviceId));
                     if (svc) setService(svc);
                 }
              } catch (err) {
-                 const fallback = JSON.parse(localStorage.getItem('bp_services') || '[]');
-                 const svc = fallback.find(s => String(s.id) === String(serviceId));
-                 if (svc) setService(svc);
+                console.error('Error fetching service for public booking:', err.message || err);
              }
         };
         fetchService();
@@ -130,19 +131,15 @@ const PublicBooking = () => {
         };
 
         try {
-            const res = await axios.post('/server/bookingsplus/api/v1/appointments/book', payload);
-            if (res.data.success) {
-                setBookingId(res.data.data.appointment_id || res.data.data.id || `SU-${Date.now()}`);
+            const res = await appointmentsApi.book(payload);
+            if (res.data?.success) {
+                setBookingId(res.data.data?.appointment_id || res.data.data?.ROWID || `SU-${Date.now()}`);
                 setBooked(true);
             }
         } catch (err) {
-            console.error('Error on booking api, using fallback', err);
-            // mock success
-            setBookingId(`SU-${String(Date.now()).slice(-5)}`);
-            const fallbackApt = { id: `SU-${String(Date.now()).slice(-5)}`, ...payload, status: 'upcoming', booked_at: new Date().toISOString() };
-            const existing = JSON.parse(localStorage.getItem('bp_appointments') || '[]');
-            localStorage.setItem('bp_appointments', JSON.stringify([...existing, fallbackApt]));
-            setBooked(true);
+            const errorMsg = err.data?.message || err.message || 'Booking failed';
+            console.error('Booking error:', errorMsg);
+            alert(`Booking failed: ${errorMsg}`);
         } finally {
             setSubmitting(false);
         }
@@ -205,7 +202,7 @@ const PublicBooking = () => {
                             <Clock size={20} color="#6B7280" />
                             {formatDuration(service.duration_minutes || service.duration || 60)}
                         </div>
-                        {service.service_type === 'group' || service.type === 'group' && (
+                        {(service.service_type === 'group' || service.type === 'group') && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#4B5563', fontSize: '14.5px', fontWeight: 500 }}>
                                 <Users size={20} color="#6B7280" />
                                 Group Booking

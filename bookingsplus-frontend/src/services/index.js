@@ -8,4 +8,5 @@ export { workspacesApi } from './workspaces.api';
 export { servicesApi } from './services.api';
 export { appointmentsApi } from './appointments.api';
 export { usersApi } from './users.api';
+export { customersApi } from './customers.api';
 export { organizationsApi } from './organizations.api';

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, User, Users, UsersRound, Monitor, Search } from 'lucide-react';
 import { Button } from '../ui/Button';
-import axios from 'axios';
+import { servicesApi, usersApi } from '../services';
 
 const SERVICE_TYPES = [
     {
@@ -34,19 +34,30 @@ const SERVICE_TYPES = [
     }
 ];
 
-// Mock staff data (would come from /api/v1/users in production)
-const MOCK_STAFF = [
-    { id: 1, name: 'Jason Miller' },
-    { id: 2, name: 'Emily Carter' },
-    { id: 3, name: 'Michael Thompson' },
-    { id: 4, name: 'Sarah Johnson' },
-    { id: 5, name: 'David Wilson' }
-];
-
 export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
     const [step, setStep] = useState(1);
     const [serviceType, setServiceType] = useState(null);
     const [isCreating, setIsCreating] = useState(false);
+    const [realStaff, setRealStaff] = useState([]);
+
+    // Fetch real employees from the API when modal opens
+    useEffect(() => {
+        if (!isOpen) return;
+        const fetchEmployees = async () => {
+            try {
+                const res = await usersApi.getAll();
+                if (res.data?.success) {
+                    setRealStaff((res.data.data || []).map(e => ({
+                        id: e.id || e.user_id || e.ROWID,
+                        name: e.name || e.display_name || 'Unknown',
+                    })));
+                }
+            } catch (err) {
+                console.error('Error fetching employees for service assignment:', err.message || err);
+            }
+        };
+        fetchEmployees();
+    }, [isOpen]);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -112,7 +123,7 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
         }
     };
 
-    const filteredStaff = MOCK_STAFF.filter(s =>
+    const filteredStaff = realStaff.filter(s =>
         s.name.toLowerCase().includes(staffSearch.toLowerCase())
     );
 
@@ -123,7 +134,6 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
     const handleCreateService = async () => {
         setIsCreating(true);
         try {
-            // Calculate duration in minutes
             const hours = parseInt(formData.durationHours) || 0;
             const minutes = parseInt(formData.durationMinutes) || 0;
             const durationMinutes = hours * 60 + minutes;
@@ -139,35 +149,27 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
                 staff_ids: selectedStaff
             };
 
-                        const response = await axios.post('/server/bookingsplus/api/v1/services', payload);
+            const response = await servicesApi.create(payload);
 
-            if (response.data.success && onServiceCreated) {
+            if (response.data?.success && onServiceCreated) {
                 onServiceCreated({
-                    id: response.data.data?.service_id || Date.now(),
+                    id: response.data.data?.service_id || response.data.data?.ROWID || Date.now(),
                     name: formData.name,
+                    service_name: formData.name,
+                    duration_minutes: durationMinutes,
                     duration: durationMinutes,
                     price: formData.priceType === 'Free' ? '$0.00' : `$${parseFloat(formData.priceValue || 0).toFixed(2)}`,
                     status: 'active',
+                    service_type: serviceType,
                     type: serviceType,
-                    staffCount: selectedStaff.length
+                    staffCount: selectedStaff.length,
+                    assignedStaff: selectedStaff,
                 });
             }
         } catch (err) {
-            console.error('Service creation failed:', err);
-            // Fallback: still add locally for demo purposes
-            if (onServiceCreated) {
-                const hours = parseInt(formData.durationHours) || 0;
-                const minutes = parseInt(formData.durationMinutes) || 0;
-                onServiceCreated({
-                    id: Date.now(),
-                    name: formData.name,
-                    duration: hours * 60 + minutes,
-                    price: formData.priceType === 'Free' ? '$0.00' : `$${parseFloat(formData.priceValue || 0).toFixed(2)}`,
-                    status: 'active',
-                    type: serviceType,
-                    staffCount: selectedStaff.length
-                });
-            }
+            const errorMsg = err.data?.message || err.message || 'Service creation failed';
+            console.error('Service creation failed:', errorMsg);
+            alert(`Error creating service: ${errorMsg}`);
         } finally {
             setIsCreating(false);
             // Reset state
@@ -303,8 +305,8 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
                             <div style={{ display: 'flex', flex: 1, position: 'relative' }}>
                                 <div style={{ 
                                     padding: '8px 12px', background: '#F9FAFB', border: '1px solid var(--pk-border)', 
-                                    borderRight: 'none', borderRadius: '4px 0 0 4px', color: 'var(--pk-text-muted)',
-                                    display: 'flex', alignItems: 'center', borderRight: '1px solid var(--pk-border)'
+                                    borderRadius: '4px 0 0 4px', color: 'var(--pk-text-muted)',
+                                    display: 'flex', alignItems: 'center'
                                 }}>$</div>
                                 <input 
                                     className="input" 
@@ -443,7 +445,7 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
         const typeInfo = SERVICE_TYPES.find(t => t.id === serviceType);
         const Icon = typeInfo?.icon || User;
         const allFilteredSelected = filteredStaff.length > 0 && filteredStaff.every(s => selectedStaff.includes(s.id));
-        const assignedStaffList = MOCK_STAFF.filter(s => selectedStaff.includes(s.id));
+        const assignedStaffList = realStaff.filter(s => selectedStaff.includes(s.id));
 
         return (
             <div className="modal-content-inner" style={{

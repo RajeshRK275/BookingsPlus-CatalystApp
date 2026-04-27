@@ -1,8 +1,17 @@
 const express = require('express');
 const router = express.Router();
-const { getDatastore, executeZCQL, insertAuditLog } = require('../../utils/datastore');
+const { getDatastore, executeZCQL, insertAuditLog, catalystDateTime } = require('../../utils/datastore');
 
 // All routes guarded by superAdminGuard in index.js
+
+/** Coerce any value to a safe BIGINT-compatible number for Catalyst Data Store */
+const toBigInt = (value) => {
+    if (value === null || value === undefined) return Date.now();
+    if (typeof value === 'number' && !isNaN(value)) return value;
+    const parsed = parseInt(String(value), 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+    return Date.now();
+};
 
 // GET / — List all users across the entire deployment
 router.get('/', async (req, res, next) => {
@@ -37,6 +46,15 @@ router.post('/invite', async (req, res, next) => {
 
         const datastore = getDatastore(req);
 
+        // Get organization_id — mandatory BIGINT column
+        let organizationId;
+        try {
+            const orgResult = await executeZCQL(req, 'SELECT ROWID FROM Organization LIMIT 1');
+            organizationId = orgResult.length > 0 ? toBigInt(orgResult[0].Organization.ROWID) : Date.now();
+        } catch (e) {
+            organizationId = Date.now();
+        }
+
         // Check if user exists locally
         let existing = await executeZCQL(req, `SELECT ROWID FROM Users WHERE email = '${email}'`);
         let userRowId;
@@ -48,19 +66,20 @@ router.post('/invite', async (req, res, next) => {
             const row = await datastore.table('Users').insertRow({
                 user_id: Date.now(),
                 catalyst_user_id: catalystUserId,
-                name: name || email.split('@')[0],
+                display_name: name || email.split('@')[0],
                 email,
+                organization_id: organizationId,
                 is_super_admin: 'false',
                 role_version: 0,
                 status: 'active',
                 color: '#E0E7FF',
                 initials: (name || email).substring(0, 2).toUpperCase(),
-                created_at: new Date().toISOString(),
+                created_at: catalystDateTime(),
             });
             userRowId = row.ROWID;
         }
 
-        // Assign to workspace if provided
+        // Assign to workspace if provided — all _id columns are BIGINT
         if (workspace_id && role_id) {
             const existingMembership = await executeZCQL(req,
                 `SELECT ROWID FROM UserWorkspaces WHERE user_id = '${userRowId}' AND workspace_id = '${workspace_id}'`
@@ -68,11 +87,11 @@ router.post('/invite', async (req, res, next) => {
             if (existingMembership.length === 0) {
                 await datastore.table('UserWorkspaces').insertRow({
                     user_workspace_id: Date.now() + 1,
-                    user_id: userRowId,
-                    workspace_id,
-                    role_id,
+                    user_id: toBigInt(userRowId),
+                    workspace_id: toBigInt(workspace_id),
+                    role_id: toBigInt(role_id),
                     status: 'active',
-                    joined_at: new Date().toISOString(),
+                    joined_at: catalystDateTime(),
                 });
             }
         }
@@ -99,20 +118,21 @@ router.post('/:id/assign-workspace', async (req, res, next) => {
         );
 
         if (existing.length > 0) {
-            // Update existing membership role
+            // Update existing membership role — role_id is BIGINT
             await datastore.table('UserWorkspaces').updateRow({
                 ROWID: existing[0].UserWorkspaces.ROWID,
-                role_id,
+                role_id: toBigInt(role_id),
                 status: 'active',
             });
         } else {
+            // All _id columns are BIGINT — must be numeric
             await datastore.table('UserWorkspaces').insertRow({
                 user_workspace_id: Date.now(),
-                user_id: req.params.id,
-                workspace_id,
-                role_id,
+                user_id: toBigInt(req.params.id),
+                workspace_id: toBigInt(workspace_id),
+                role_id: toBigInt(role_id),
                 status: 'active',
-                joined_at: new Date().toISOString(),
+                joined_at: catalystDateTime(),
             });
         }
 
@@ -163,7 +183,13 @@ router.put('/:id/toggle-super-admin', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
     try {
         const datastore = getDatastore(req);
-        const updateData = { ROWID: req.params.id, ...req.body };
+        const body = { ...req.body };
+        // Remap 'name' → 'display_name' for Catalyst compatibility
+        if (body.name && !body.display_name) {
+            body.display_name = body.name;
+        }
+        delete body.name;
+        const updateData = { ROWID: req.params.id, ...body };
         const updated = await datastore.table('Users').updateRow(updateData);
         res.json({ success: true, data: updated });
     } catch (err) {

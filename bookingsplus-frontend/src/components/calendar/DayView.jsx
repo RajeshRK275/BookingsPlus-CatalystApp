@@ -1,5 +1,5 @@
 import React from 'react';
-import { format, isSameDay } from 'date-fns';
+import { isSameDay } from 'date-fns';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 

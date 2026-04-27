@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { X, MoreVertical, Share2, ClipboardCopy, Trash2, Copy, MoveRight, CheckSquare, Users, Clock, CalendarDays, Bell, FileText } from 'lucide-react';
+import { X, MoreVertical, Share2, Trash2, Copy, MoveRight, CheckSquare, Users, Clock, CalendarDays, Bell, FileText } from 'lucide-react';
 import ServiceDetailsTab from '../components/service-tabs/ServiceDetailsTab';
 import AssignedGroupsTab from '../components/service-tabs/AssignedGroupsTab';
 import AvailabilityLimitsTab from '../components/service-tabs/AvailabilityLimitsTab';
@@ -8,8 +8,8 @@ import SchedulingRulesTab from '../components/service-tabs/SchedulingRulesTab';
 import NotificationPreferencesTab from '../components/service-tabs/NotificationPreferencesTab';
 import BookingFormTab from '../components/service-tabs/BookingFormTab';
 import ShareServiceModal from '../components/ShareServiceModal';
-import axios from 'axios';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { servicesApi } from '../services';
 
 const TABS = [
     { id: 'details', label: 'Service Details', desc: 'Set the duration, payment type, and meeting mode.', icon: CheckSquare },
@@ -34,15 +34,18 @@ const ServiceDetail = () => {
     useEffect(() => {
         const fetchService = async () => {
             try {
-                const response = await axios.get('/server/bookingsplus/api/v1/services');
+                const response = await servicesApi.getAll();
                 if (response.data && response.data.success) {
-                    const svc = response.data.data.find(s => String(s.id || s.service_id) === String(serviceId));
+                    const allSvcs = (response.data.data || []).map(s => ({
+                        ...s,
+                        name: s.name || s.service_name || 'Untitled',
+                        id: s.id || s.service_id || s.ROWID,
+                    }));
+                    const svc = allSvcs.find(s => String(s.id) === String(serviceId) || String(s.service_id) === String(serviceId));
                     if (svc) setService(svc);
                 }
             } catch (err) {
-                 const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-                 const svc = services.find(s => String(s.id) === String(serviceId));
-                 if (svc) setService(svc);
+                console.error('Error fetching service detail:', err.message || err);
             } finally {
                 setLoading(false);
             }
@@ -56,26 +59,22 @@ const ServiceDetail = () => {
         setService(updatedService);
         try {
             const targetId = updatedService.id || updatedService.service_id;
-            await axios.put(`/server/bookingsplus/api/v1/services/${targetId}`, updatedService);
+            await servicesApi.update(targetId, updatedService);
         } catch (err) {
-            console.error('API update failed, updating local fallback', err);
-            const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-            const index = services.findIndex(s => String(s.id) === String(updatedService.id));
-            if (index >= 0) services[index] = updatedService;
-            else services.push(updatedService);
-            localStorage.setItem('bp_services', JSON.stringify(services));
+            const errorMsg = err.data?.message || err.message || 'Failed to update service';
+            console.error('Service update failed:', errorMsg);
+            alert(`Error updating service: ${errorMsg}`);
         }
     };
 
     const handleDelete = async () => {
         try {
             const targetId = service.id || service.service_id;
-            await axios.delete(`/server/bookingsplus/api/v1/services/${targetId}`);
+            await servicesApi.remove(targetId);
         } catch (err) {
-            console.error('API delete failed, deleting local fallback', err);
-            const services = JSON.parse(localStorage.getItem('bp_services') || '[]');
-            const filtered = services.filter(s => String(s.id) !== String(serviceId));
-            localStorage.setItem('bp_services', JSON.stringify(filtered));
+            const errorMsg = err.data?.message || err.message || 'Failed to delete service';
+            console.error('Service delete failed:', errorMsg);
+            alert(`Error deleting service: ${errorMsg}`);
         } finally {
             navigate(`/ws/${wsSlug}/services`);
         }

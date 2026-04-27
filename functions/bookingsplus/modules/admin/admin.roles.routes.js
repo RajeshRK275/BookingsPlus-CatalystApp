@@ -4,6 +4,15 @@ const { getDatastore, executeZCQL, insertAuditLog } = require('../../utils/datas
 
 // All routes guarded by superAdminGuard in index.js
 
+/** Coerce any value to a safe BIGINT-compatible number for Catalyst Data Store */
+const toBigInt = (value) => {
+    if (value === null || value === undefined) return Date.now();
+    if (typeof value === 'number' && !isNaN(value)) return value;
+    const parsed = parseInt(String(value), 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+    return Date.now();
+};
+
 // GET /:wsId/roles — List all roles for a workspace
 router.get('/:wsId/roles', async (req, res, next) => {
     try {
@@ -24,22 +33,24 @@ router.post('/:wsId/roles', async (req, res, next) => {
         if (!role_name) return res.status(400).json({ success: false, message: 'role_name required.' });
 
         const datastore = getDatastore(req);
+        // workspace_id is BIGINT — must be numeric
         const roleRow = await datastore.table('Roles').insertRow({
             role_id: Date.now(),
-            workspace_id: req.params.wsId,
+            workspace_id: toBigInt(req.params.wsId),
             role_name,
             role_level: parseInt(role_level) || 0,
             is_system: 'false',
             description: description || '',
         });
 
-        // Assign permissions if provided
+        // Assign permissions if provided — all _id columns are BIGINT
         if (Array.isArray(permission_ids)) {
-            for (const permId of permission_ids) {
+            const baseTs = Date.now();
+            for (let i = 0; i < permission_ids.length; i++) {
                 await datastore.table('RolePermissions').insertRow({
-                    role_perm_id: Date.now() + Math.random() * 1000,
-                    role_id: roleRow.ROWID,
-                    permission_id: permId,
+                    role_perm_id: baseTs + i + 1,
+                    role_id: toBigInt(roleRow.ROWID),
+                    permission_id: toBigInt(permission_ids[i]),
                 });
             }
         }

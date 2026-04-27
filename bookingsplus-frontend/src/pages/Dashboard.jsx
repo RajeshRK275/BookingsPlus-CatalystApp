@@ -8,14 +8,7 @@ import { format, subDays, isSameDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import AddAppointmentModal from '../components/calendar/AddAppointmentModal';
-
-const MOCK_STAFF = [
-    { id: 1, name: 'Jason Miller' },
-    { id: 2, name: 'Emily Carter' },
-    { id: 3, name: 'Michael Thompson' },
-    { id: 4, name: 'Sarah Johnson' },
-    { id: 5, name: 'David Wilson' }
-];
+import { appointmentsApi, servicesApi, usersApi } from '../services';
 
 const Dashboard = () => {
     const { user } = useAuth();
@@ -26,21 +19,29 @@ const Dashboard = () => {
     
     const [appointments, setAppointments] = useState([]);
     const [servicesCount, setServicesCount] = useState(0);
-    const [customersCount, setCustomersCount] = useState(0);
+    const [staffList, setStaffList] = useState([]);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
     useEffect(() => {
-        const loadData = () => {
-            const apts = JSON.parse(localStorage.getItem('bp_appointments') || '[]');
-            setAppointments(apts);
-            
-            const srvs = JSON.parse(localStorage.getItem('bp_services') || '[]');
-            setServicesCount(srvs.length);
-
-            const custs = JSON.parse(localStorage.getItem('bp_customers') || '[]');
-            setCustomersCount(custs.length);
+        const loadData = async () => {
+            const [aptRes, svcRes, empRes] = await Promise.allSettled([
+                appointmentsApi.getAll(),
+                servicesApi.getAll(),
+                usersApi.getAll(),
+            ]);
+            if (aptRes.status === 'fulfilled' && aptRes.value.data?.success) {
+                setAppointments(aptRes.value.data.data || []);
+            }
+            if (svcRes.status === 'fulfilled' && svcRes.value.data?.success) {
+                setServicesCount((svcRes.value.data.data || []).length);
+            }
+            if (empRes.status === 'fulfilled' && empRes.value.data?.success) {
+                setStaffList((empRes.value.data.data || []).map(e => ({
+                    id: e.id || e.user_id || e.ROWID,
+                    name: e.name || e.display_name || 'Unknown',
+                })));
+            }
         };
-        
         loadData();
     }, []);
 
@@ -66,8 +67,7 @@ const Dashboard = () => {
             upcomingAppointments: upcomingCount,
             revenue: totalRevenue.toFixed(2),
         };
-    }, [appointments, user]);
-
+    }, [appointments, user, isSuperAdmin, hasPermission]);
 
     // Generate chart data for last 7 days
     const chartData = useMemo(() => {
@@ -87,8 +87,7 @@ const Dashboard = () => {
             });
         }
         return data;
-    }, [appointments, user]);
-
+    }, [appointments, user, isSuperAdmin, hasPermission]);
 
     // Recent upcoming appointments (sort by soonest)
     const recentUpcoming = useMemo(() => {
@@ -102,12 +101,10 @@ const Dashboard = () => {
             .filter(a => new Date(a.start_time) >= now)
             .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
             .slice(0, 5);
-    }, [appointments, user]);
+    }, [appointments, user, isSuperAdmin, hasPermission]);
 
     const handleAppointmentAdded = (newApt) => {
-        const updated = [...appointments, newApt];
-        setAppointments(updated);
-        localStorage.setItem('bp_appointments', JSON.stringify(updated));
+        setAppointments(prev => [...prev, newApt]);
     };
 
     return (
@@ -156,8 +153,8 @@ const Dashboard = () => {
                             <Users size={20} color="#9333EA" />
                         </div>
                     </div>
-                    <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--pk-text-main)', marginBottom: '4px' }}>{customersCount}</div>
-                    <div style={{ fontSize: '14px', color: 'var(--pk-text-muted)' }}>Total Customers</div>
+                    <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--pk-text-main)', marginBottom: '4px' }}>{servicesCount}</div>
+                    <div style={{ fontSize: '14px', color: 'var(--pk-text-muted)' }}>Active Services</div>
                 </div>
             </div>
 
@@ -262,7 +259,7 @@ const Dashboard = () => {
                 isOpen={isAddModalOpen} 
                 onClose={() => setIsAddModalOpen(false)} 
                 slotDetails={null}
-                staffList={MOCK_STAFF}
+                staffList={staffList}
                 onAdded={handleAppointmentAdded}
             />
         </div>

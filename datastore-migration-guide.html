@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BookingsPlus — Catalyst Data Store Migration Guide</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #1a1a2e; }
+  .header { background: linear-gradient(135deg, #5C44B5, #7B5EA7); color: white; padding: 32px 40px; }
+  .header h1 { font-size: 26px; font-weight: 700; }
+  .header p { margin-top: 8px; opacity: 0.85; font-size: 14px; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 20px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
+  .badge { padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .badge-critical { background: #fce4e4; color: #c0392b; border: 1px solid #e74c3c; }
+  .badge-add { background: #e8f4fd; color: #1565c0; border: 1px solid #2196f3; }
+  .badge-create { background: #e8f5e9; color: #2e7d32; border: 1px solid #4caf50; }
+  .badge-done { background: #f1f8e9; color: #558b2f; border: 1px solid #8bc34a; }
+  .progress-bar-wrap { background: #e0e0e0; border-radius: 8px; height: 12px; margin-bottom: 8px; }
+  .progress-bar { background: linear-gradient(90deg, #5C44B5, #7B5EA7); height: 12px; border-radius: 8px; transition: width 0.4s; }
+  .progress-label { font-size: 13px; color: #555; margin-bottom: 28px; }
+  .step-card { background: white; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); overflow: hidden; }
+  .step-header { padding: 18px 24px; display: flex; align-items: center; gap: 14px; cursor: pointer; user-select: none; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0; }
+  .step-num-critical { background: #fce4e4; color: #c0392b; }
+  .step-num-add { background: #e8f4fd; color: #1565c0; }
+  .step-num-create { background: #e8f5e9; color: #2e7d32; }
+  .step-info { flex: 1; }
+  .step-title { font-size: 15px; font-weight: 600; }
+  .step-subtitle { font-size: 12px; color: #777; margin-top: 3px; }
+  .step-toggle { font-size: 20px; color: #aaa; transition: transform 0.2s; }
+  .step-body { padding: 0 24px 20px 76px; display: none; }
+  .step-body.open { display: block; }
+  .step-description { font-size: 13px; color: #555; line-height: 1.7; margin-bottom: 16px; white-space: pre-line; }
+  .note-box { background: #fffde7; border-left: 4px solid #f9a825; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #5d4037; margin-bottom: 16px; }
+  .col-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .col-table th { background: #f5f5f5; padding: 8px 12px; text-align: left; font-weight: 600; color: #444; border-bottom: 2px solid #e0e0e0; }
+  .col-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+  .col-table tr:last-child td { border-bottom: none; }
+  .col-name { font-family: 'Courier New', monospace; font-weight: 600; color: #3949ab; }
+  .col-type { font-family: 'Courier New', monospace; color: #6a1b9a; }
+  .check-col { width: 32px; text-align: center; }
+  .check-box { width: 18px; height: 18px; cursor: pointer; accent-color: #5C44B5; }
+  .done-row { background: #f9fbe7; }
+  .done-row .col-name { text-decoration: line-through; color: #aaa; }
+  .step-actions { margin-top: 14px; display: flex; gap: 10px; }
+  .btn { padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .btn-mark-done { background: #5C44B5; color: white; }
+  .btn-mark-done:hover { background: #4a3598; }
+  .btn-reset { background: #f5f5f5; color: #555; }
+  .status-done { display: none; }
+  .step-card.completed .step-num { background: #e8f5e9 !important; color: #2e7d32 !important; }
+  .step-card.completed .step-title::after { content: ' ✅'; }
+  .summary-card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 28px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
+  .summary-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: #333; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .summary-item { background: #f8f9fa; border-radius: 8px; padding: 12px 16px; }
+  .summary-item .num { font-size: 24px; font-weight: 700; color: #5C44B5; }
+  .summary-item .label { font-size: 12px; color: #777; margin-top: 4px; }
+  .warning-banner { background: #fff3e0; border: 1px solid #ff9800; border-radius: 10px; padding: 16px 20px; margin-bottom: 24px; }
+  .warning-banner h3 { color: #e65100; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .warning-banner p { font-size: 13px; color: #bf360c; line-height: 1.6; }
+  @media (max-width: 600px) {
+    .step-body { padding: 0 16px 16px 16px; }
+    .header { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📦 BookingsPlus — Catalyst Data Store Migration Guide</h1>
+  <p>Follow each step below in the Catalyst Console to align your Data Store with the full application schema.</p>
+</div>
+
+<div class="container">
+
+  <!-- Progress -->
+  <div class="progress-bar-wrap">
+    <div class="progress-bar" id="progressBar" style="width:0%"></div>
+  </div>
+  <div class="progress-label" id="progressLabel">0 of 18 steps completed</div>
+
+  <!-- Warning Banner -->
+  <div class="warning-banner">
+    <h3>⚠️ Important: "Organizations" vs "Organization" Naming Issue</h3>
+    <p>
+      Your Catalyst Data Store currently has a table named <strong>"Organizations"</strong> (plural).<br/>
+      The application code references <strong>"Organization"</strong> (singular — no "s").<br/>
+      Catalyst does NOT support table renames. <strong>You must create a brand new table named exactly "Organization"</strong>
+      and leave "Organizations" untouched (or delete it only after migrating any data).
+    </p>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary-card">
+    <h2>📊 Migration Overview</h2>
+    <div class="summary-grid">
+      <div class="summary-item"><div class="num">1</div><div class="label">Critical Fix (table rename)</div></div>
+      <div class="summary-item"><div class="num">9</div><div class="label">Existing tables needing columns</div></div>
+      <div class="summary-item"><div class="num">9</div><div class="label">New tables to create</div></div>
+      <div class="summary-item"><div class="num">56</div><div class="label">Total columns to add/create</div></div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <span class="badge badge-critical">🔴 Critical Fix</span>
+    <span class="badge badge-add">🔵 Add Columns</span>
+    <span class="badge badge-create">🟢 Create Table</span>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <!-- STEP 1: Organization Table (Critical) -->
+  <!-- ════════════════════════════════════════════════ -->
+  <div class="step-card" id="step-1">
+    <div class="step-header" onclick="toggleStep(1)">
+      <div class="step-num step-num-critical">1</div>
+      <div class="step-info">
+        <div class="step-title">Create New Table: "Organization" (fix naming issue)</div>
+        <div class="step-subtitle badge badge-critical">🔴 Critical Fix</div>
+      </div>
+      <div class="step-toggle" id="toggle-1">▼</div>
+    </div>
+    <div class="step-body" id="body-1">
+      <div class="step-description">Catalyst Console → Data Store → click "+ New Table" → enter name: Organization (no "s")</div>
+      <div class="note-box">⚠️ The existing "Organizations" table cannot be renamed. Create a NEW table named "Organization". The app will use this new table.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody id="cols-1">
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">organization_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">org_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">org_slug</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">timezone</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">currency</td><td class="col-type">varchar(10)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">subscription_plan</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">owner_user_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">logo_url</td><td class="col-type">varchar(500)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">brand_color</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">status</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">setup_completed</td><td class="col-type">varchar(10)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">created_at</td><td class="col-type">datetime</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(1)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(1)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: Users — Add Missing Columns -->
+  <div class="step-card" id="step-2">
+    <div class="step-header" onclick="toggleStep(2)">
+      <div class="step-num step-num-add">2</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Users"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-2">▼</div>
+    </div>
+    <div class="step-body" id="body-2">
+      <div class="step-description">Catalyst Console → Data Store → Users → Schema View → "+ New Column" for each row below.</div>
+      <div class="note-box">💡 Your existing columns (name, role_id, tenant_id, etc.) are kept. These new columns are ADDED alongside them. The app uses "display_name" for the display name, not "name".</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">catalyst_user_id</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">catalyst_role_id</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">display_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">phone</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">avatar_url</td><td class="col-type">varchar(500)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">designation</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">gender</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">dob</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">color</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">initials</td><td class="col-type">varchar(5)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">is_super_admin</td><td class="col-type">varchar(10)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_version</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">created_at</td><td class="col-type">datetime</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(2)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(2)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: Roles — Add Columns -->
+  <div class="step-card" id="step-3">
+    <div class="step-header" onclick="toggleStep(3)">
+      <div class="step-num step-num-add">3</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Roles"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-3">▼</div>
+    </div>
+    <div class="step-body" id="body-3">
+      <div class="step-description">Catalyst Console → Data Store → Roles → Schema View → "+ New Column"</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_name</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_level</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">is_system</td><td class="col-type">varchar(10)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">description</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(3)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(3)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4: Services — Add Columns -->
+  <div class="step-card" id="step-4">
+    <div class="step-header" onclick="toggleStep(4)">
+      <div class="step-num step-num-add">4</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Services"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-4">▼</div>
+    </div>
+    <div class="step-body" id="body-4">
+      <div class="step-description">Catalyst Console → Data Store → Services → Schema View → "+ New Column"</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">service_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">service_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">description</td><td class="col-type">varchar(1000)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">duration_minutes</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">price</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">service_type</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">meeting_mode</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">meeting_location</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">seats</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">status</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(4)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(4)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5: Staff -->
+  <div class="step-card" id="step-5">
+    <div class="step-header" onclick="toggleStep(5)">
+      <div class="step-num step-num-add">5</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Staff"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-5">▼</div>
+    </div>
+    <div class="step-body" id="body-5">
+      <div class="step-description">Catalyst Console → Data Store → Staff → Schema View → "+ New Column"</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">staff_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">user_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">working_hours_profile_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">service_ids</td><td class="col-type">varchar(1000)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(5)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(5)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 6: Availability -->
+  <div class="step-card" id="step-6">
+    <div class="step-header" onclick="toggleStep(6)">
+      <div class="step-num step-num-add">6</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Availability"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-6">▼</div>
+    </div>
+    <div class="step-body" id="body-6">
+      <div class="step-description">Catalyst Console → Data Store → Availability → Schema View → "+ New Column"</div>
+      <div class="note-box">💡 Catalyst does not support TIME data type. Use varchar(10) for start_time and end_time (store values like "09:00", "17:30").</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">availability_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">staff_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">day_of_week</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">start_time</td><td class="col-type">varchar(10)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">end_time</td><td class="col-type">varchar(10)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(6)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(6)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 7: Customers -->
+  <div class="step-card" id="step-7">
+    <div class="step-header" onclick="toggleStep(7)">
+      <div class="step-num step-num-add">7</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Customers"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-7">▼</div>
+    </div>
+    <div class="step-body" id="body-7">
+      <div class="step-description">Catalyst Console → Data Store → Customers → Schema View → "+ New Column"</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">customer_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">customer_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">email</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">phone</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">notes</td><td class="col-type">varchar(2000)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(7)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(7)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 8: Appointments -->
+  <div class="step-card" id="step-8">
+    <div class="step-header" onclick="toggleStep(8)">
+      <div class="step-num step-num-add">8</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Appointments"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-8">▼</div>
+    </div>
+    <div class="step-body" id="body-8">
+      <div class="step-description">Catalyst Console → Data Store → Appointments → Schema View → "+ New Column"</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">appointment_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">service_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">staff_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">customer_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">service_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">staff_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">customer_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">appointment_status</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">approval_status</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">payment_status</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">start_time</td><td class="col-type">datetime</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">end_time</td><td class="col-type">datetime</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">notes</td><td class="col-type">varchar(2000)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(8)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(8)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 9: Appointment_Approvals -->
+  <div class="step-card" id="step-9">
+    <div class="step-header" onclick="toggleStep(9)">
+      <div class="step-num step-num-add">9</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Appointment_Approvals"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-9">▼</div>
+    </div>
+    <div class="step-body" id="body-9">
+      <div class="step-description">Catalyst Console → Data Store → Appointment_Approvals → Schema View → "+ New Column"</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">approval_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">appointment_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">approver_role</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">approver_user_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">approval_status</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">comments</td><td class="col-type">varchar(2000)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">approved_at</td><td class="col-type">datetime</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(9)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(9)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 10: Integrations -->
+  <div class="step-card" id="step-10">
+    <div class="step-header" onclick="toggleStep(10)">
+      <div class="step-num step-num-add">10</div>
+      <div class="step-info">
+        <div class="step-title">Add columns to existing table: "Integrations"</div>
+        <div class="step-subtitle badge badge-add">🔵 Add Columns to Existing Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-10">▼</div>
+    </div>
+    <div class="step-body" id="body-10">
+      <div class="step-description">Catalyst Console → Data Store → Integrations → Schema View → "+ New Column"</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">integration_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">integration_type</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">config_json</td><td class="col-type">varchar(4000)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">status</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(10)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(10)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEPS 11-18: Create New Tables -->
+
+  <!-- STEP 11: Workspaces -->
+  <div class="step-card" id="step-11">
+    <div class="step-header" onclick="toggleStep(11)">
+      <div class="step-num step-num-create">11</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "Workspaces"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-11">▼</div>
+    </div>
+    <div class="step-body" id="body-11">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: Workspaces → Add all columns below</div>
+      <div class="note-box">💡 Divisions/branches of your organization. Multiple workspaces can exist per deployment.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_name</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_slug</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">description</td><td class="col-type">varchar(1000)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">logo_url</td><td class="col-type">varchar(500)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">brand_color</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">timezone</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">currency</td><td class="col-type">varchar(10)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">status</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">created_by</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">created_at</td><td class="col-type">datetime</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(11)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(11)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 12: UserWorkspaces -->
+  <div class="step-card" id="step-12">
+    <div class="step-header" onclick="toggleStep(12)">
+      <div class="step-num step-num-create">12</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "UserWorkspaces"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-12">▼</div>
+    </div>
+    <div class="step-body" id="body-12">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: UserWorkspaces</div>
+      <div class="note-box">💡 M:N pivot table — a user can belong to multiple workspaces with different roles in each.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">user_workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">user_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">status</td><td class="col-type">varchar(20)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">joined_at</td><td class="col-type">datetime</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(12)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(12)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 13: Permissions -->
+  <div class="step-card" id="step-13">
+    <div class="step-header" onclick="toggleStep(13)">
+      <div class="step-num step-num-create">13</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "Permissions"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-13">▼</div>
+    </div>
+    <div class="step-body" id="body-13">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: Permissions</div>
+      <div class="note-box">💡 Seeded automatically with 25 granular permissions when you run /api/v1/organizations/setup.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">permission_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">permission_key</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">resource</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">action</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">description</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(13)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(13)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 14: RolePermissions -->
+  <div class="step-card" id="step-14">
+    <div class="step-header" onclick="toggleStep(14)">
+      <div class="step-num step-num-create">14</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "RolePermissions"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-14">▼</div>
+    </div>
+    <div class="step-body" id="body-14">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: RolePermissions</div>
+      <div class="note-box">💡 M:N pivot — defines which permissions a role grants. Auto-populated during workspace setup.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_perm_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">permission_id</td><td class="col-type">bigint</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(14)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(14)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 15: UserRoleMapping -->
+  <div class="step-card" id="step-15">
+    <div class="step-header" onclick="toggleStep(15)">
+      <div class="step-num step-num-create">15</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "UserRoleMapping"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-15">▼</div>
+    </div>
+    <div class="step-body" id="body-15">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: UserRoleMapping</div>
+      <div class="note-box">💡 Admin-driven role sync table. Used to invalidate user sessions when an admin changes a user's Catalyst role.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">mapping_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">user_email</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">catalyst_user_id</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">catalyst_role_id</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">subscription_type</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">assigned_by</td><td class="col-type">varchar(255)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">role_version</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">updated_at</td><td class="col-type">datetime</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(15)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(15)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 16: ServiceStaff -->
+  <div class="step-card" id="step-16">
+    <div class="step-header" onclick="toggleStep(16)">
+      <div class="step-num step-num-create">16</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "ServiceStaff"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-16">▼</div>
+    </div>
+    <div class="step-body" id="body-16">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: ServiceStaff</div>
+      <div class="note-box">💡 Links which staff members are assigned to which services within a workspace.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">service_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">staff_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(16)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(16)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 17: AuditLog -->
+  <div class="step-card" id="step-17">
+    <div class="step-header" onclick="toggleStep(17)">
+      <div class="step-num step-num-create">17</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "AuditLog"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-17">▼</div>
+    </div>
+    <div class="step-body" id="body-17">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: AuditLog</div>
+      <div class="note-box">💡 Tracks all create/update/delete actions across all workspaces for compliance and debugging.</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">log_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">user_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">action</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">resource_type</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">resource_id</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">details_json</td><td class="col-type">varchar(4000)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">ip_address</td><td class="col-type">varchar(50)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">created_at</td><td class="col-type">datetime</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(17)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(17)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 18: WorkspaceSettings -->
+  <div class="step-card" id="step-18">
+    <div class="step-header" onclick="toggleStep(18)">
+      <div class="step-num step-num-create">18</div>
+      <div class="step-info">
+        <div class="step-title">Create new table: "WorkspaceSettings"</div>
+        <div class="step-subtitle badge badge-create">🟢 Create New Table</div>
+      </div>
+      <div class="step-toggle" id="toggle-18">▼</div>
+    </div>
+    <div class="step-body" id="body-18">
+      <div class="step-description">Catalyst Console → Data Store → "+ New Table" → Name: WorkspaceSettings</div>
+      <div class="note-box">💡 Per-workspace key-value configuration store (e.g., booking rules, notification preferences).</div>
+      <table class="col-table">
+        <thead><tr><th class="check-col">✓</th><th>Column Name</th><th>Data Type</th><th>Mandatory</th></tr></thead>
+        <tbody>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">setting_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">workspace_id</td><td class="col-type">bigint</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">setting_key</td><td class="col-type">varchar(100)</td><td>No</td></tr>
+          <tr><td class="check-col"><input type="checkbox" class="check-box" onchange="checkRow(this)"/></td><td class="col-name">setting_value</td><td class="col-type">varchar(4000)</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="step-actions">
+        <button class="btn btn-mark-done" onclick="markDone(18)">✅ Mark Step Done</button>
+        <button class="btn btn-reset" onclick="resetStep(18)">↩ Reset</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+const TOTAL_STEPS = 18;
+
+function toggleStep(n) {
+  const body = document.getElementById('body-' + n);
+  const toggle = document.getElementById('toggle-' + n);
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  toggle.textContent = isOpen ? '▼' : '▲';
+}
+
+function checkRow(checkbox) {
+  const row = checkbox.closest('tr');
+  if (checkbox.checked) {
+    row.classList.add('done-row');
+  } else {
+    row.classList.remove('done-row');
+  }
+}
+
+function markDone(n) {
+  const card = document.getElementById('step-' + n);
+  card.classList.add('completed');
+  // Check all checkboxes
+  const checkboxes = card.querySelectorAll('.check-box');
+  checkboxes.forEach(cb => {
+    cb.checked = true;
+    checkRow(cb);
+  });
+  updateProgress();
+  // Close the step
+  const body = document.getElementById('body-' + n);
+  const toggle = document.getElementById('toggle-' + n);
+  body.classList.remove('open');
+  toggle.textContent = '▼';
+}
+
+function resetStep(n) {
+  const card = document.getElementById('step-' + n);
+  card.classList.remove('completed');
+  const checkboxes = card.querySelectorAll('.check-box');
+  checkboxes.forEach(cb => {
+    cb.checked = false;
+    checkRow(cb);
+  });
+  updateProgress();
+}
+
+function updateProgress() {
+  const completed = document.querySelectorAll('.step-card.completed').length;
+  const pct = Math.round((completed / TOTAL_STEPS) * 100);
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = `${completed} of ${TOTAL_STEPS} steps completed${pct === 100 ? ' 🎉 Migration Complete!' : ''}`;
+}
+
+// Load saved state from localStorage
+(function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('bp_migration_state') || '{}');
+    for (let n = 1; n <= TOTAL_STEPS; n++) {
+      if (saved['step_' + n]) markDone(n);
+    }
+  } catch(e) {}
+})();
+
+// Save state on every change
+document.addEventListener('change', function() {
+  const state = {};
+  for (let n = 1; n <= TOTAL_STEPS; n++) {
+    state['step_' + n] = document.getElementById('step-' + n).classList.contains('completed');
+  }
+  localStorage.setItem('bp_migration_state', JSON.stringify(state));
+  updateProgress();
+});
+
+// Open step 1 by default
+toggleStep(1);
+</script>
+</body>
+</html>

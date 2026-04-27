@@ -4,6 +4,15 @@ const { getDatastore, executeZCQL } = require('../../utils/datastore');
 
 // All routes guarded by superAdminGuard in index.js
 
+/** Coerce any value to a safe BIGINT-compatible number for Catalyst Data Store */
+const toBigInt = (value) => {
+    if (value === null || value === undefined) return Date.now();
+    if (typeof value === 'number' && !isNaN(value)) return value;
+    const parsed = parseInt(String(value), 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+    return Date.now();
+};
+
 // GET / — List all permission definitions
 router.get('/', async (req, res, next) => {
     try {
@@ -48,16 +57,18 @@ router.post('/roles/:roleId/assign', async (req, res, next) => {
         const datastore = getDatastore(req);
         let added = 0;
 
+        const baseTs = Date.now();
         for (const permId of permission_ids) {
             // Check if already assigned
             const existing = await executeZCQL(req,
                 `SELECT ROWID FROM RolePermissions WHERE role_id = '${req.params.roleId}' AND permission_id = '${permId}'`
             );
             if (existing.length === 0) {
+                // All _id columns are BIGINT — must be numeric
                 await datastore.table('RolePermissions').insertRow({
-                    role_perm_id: Date.now() + added,
-                    role_id: req.params.roleId,
-                    permission_id: permId,
+                    role_perm_id: baseTs + added + 1,
+                    role_id: toBigInt(req.params.roleId),
+                    permission_id: toBigInt(permId),
                 });
                 added++;
             }

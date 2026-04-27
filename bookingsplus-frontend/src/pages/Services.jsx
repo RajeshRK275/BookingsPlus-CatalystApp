@@ -4,17 +4,9 @@ import { Button } from '../ui/Button';
 import { Plus, Search, Share2, LayoutGrid, List, ChevronDown } from 'lucide-react';
 import { CreateServiceModal } from '../components/CreateServiceModal';
 import ShareServiceModal from '../components/ShareServiceModal';
-import axios from 'axios';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import PermissionGate from '../components/PermissionGate';
-
-const MOCK_STAFF = [
-    { id: 1, name: 'Jason Miller' },
-    { id: 2, name: 'Emily Carter' },
-    { id: 3, name: 'Michael Thompson' },
-    { id: 4, name: 'Sarah Johnson' },
-    { id: 5, name: 'David Wilson' }
-];
+import { servicesApi, usersApi } from '../services';
 
 const getInitials = (name) => name ? name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : 'SV';
 
@@ -40,29 +32,42 @@ const Services = () => {
     const navigate = useNavigate();
     const wsSlug = activeWorkspace?.workspace_slug || '';
     const [services, setServices] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [employees, setEmployees] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState('list');
     const [shareService, setShareService] = useState(null);
 
     useEffect(() => {
-        const fetchServices = async () => {
+        const fetchData = async () => {
             try {
-                                const response = await axios.get('/server/bookingsplus/api/v1/services');
-                if (response.data && response.data.success) {
-                    setServices(response.data.data);
+                const [svcRes, empRes] = await Promise.allSettled([
+                    servicesApi.getAll(),
+                    usersApi.getAll(),
+                ]);
+                if (svcRes.status === 'fulfilled' && svcRes.value.data?.success) {
+                    const normalized = (svcRes.value.data.data || []).map(s => ({
+                        ...s,
+                        name: s.name || s.service_name || 'Untitled Service',
+                        id: s.id || s.service_id || s.ROWID,
+                    }));
+                    setServices(normalized);
+                }
+                if (empRes.status === 'fulfilled' && empRes.value.data?.success) {
+                    setEmployees((empRes.value.data.data || []).map(e => ({
+                        ...e,
+                        id: e.id || e.user_id || e.ROWID,
+                        name: e.name || e.display_name || 'Unknown',
+                    })));
                 }
             } catch (err) {
-                console.error('Error fetching services from Catalyst:', err);
-                const fallback = localStorage.getItem('bp_services');
-                if (fallback) setServices(JSON.parse(fallback));
+                console.error('Error fetching services/employees:', err.message || err);
             } finally {
-                setLoading(false);
+                setIsLoading(false);
             }
         };
-
-        fetchServices();
+        fetchData();
     }, []);
 
     const handleServiceCreated = (newService) => {
@@ -70,7 +75,7 @@ const Services = () => {
     };
 
     const filteredServices = services.filter(s =>
-        s.name.toLowerCase().includes(searchQuery.toLowerCase())
+        (s.name || s.service_name || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     const activeCount = services.filter(s => s.status === 'active').length;
@@ -138,16 +143,19 @@ const Services = () => {
                     <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>Staff</span>
                     <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', textAlign: 'right' }}>Actions</span>
                 </div>
-
-                {/* Table Rows */}
-                {filteredServices.length === 0 ? (
+{/* Table Rows */}
+                {isLoading ? (
+                    <div style={{ padding: '48px', textAlign: 'center', color: 'var(--pk-text-muted)' }}>
+                        Loading services...
+                    </div>
+                ) : filteredServices.length === 0 ? (
                     <div style={{ padding: '48px', textAlign: 'center', color: 'var(--pk-text-muted)' }}>
                         No services found.
                     </div>
                 ) : (
                     filteredServices.map((service) => {
                         const staffList = (service.assignedStaff || [])
-                            .map(id => MOCK_STAFF.find(s => s.id === id))
+                            .map(id => employees.find(s => String(s.id) === String(id)))
                             .filter(Boolean);
 
                         return (

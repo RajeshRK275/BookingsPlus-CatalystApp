@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { format } from 'date-fns';
-import axios from 'axios';
+import { servicesApi, appointmentsApi } from '../../services';
 
 const AddAppointmentModal = ({ isOpen, onClose, slotDetails, staffList, onAdded }) => {
     const [services, setServices] = useState([]);
@@ -18,17 +18,18 @@ const AddAppointmentModal = ({ isOpen, onClose, slotDetails, staffList, onAdded 
     useEffect(() => {
         if (!isOpen) return;
         
-        // Fetch services
         const fetchServices = async () => {
             try {
-                                const response = await axios.get('/server/bookingsplus/api/v1/services');
+                const response = await servicesApi.getAll();
                 if (response.data && response.data.success) {
-                    setServices(response.data.data);
+                    setServices((response.data.data || []).map(s => ({
+                        ...s,
+                        name: s.name || s.service_name || 'Untitled',
+                        id: s.id || s.service_id || s.ROWID,
+                    })));
                 }
             } catch (err) {
-                // Fallback for UI if DB table doesn't exist
-                const fallback = JSON.parse(localStorage.getItem('bp_services') || '[]');
-                setServices(fallback);
+                console.error('Error fetching services for modal:', err.message || err);
             }
         };
         fetchServices();
@@ -71,20 +72,19 @@ const AddAppointmentModal = ({ isOpen, onClose, slotDetails, staffList, onAdded 
             service_name: selectedService.name,
             staff_id: formData.staffId,
             staff_name: staffName,
-            customer_id: formData.customerEmail, // Mock generic customer ID usage
+            customer_id: 0, // Will be linked to a Customers table record later
             customer_name: formData.customerName,
+            customer_email: formData.customerEmail,
             start_time: startTime.toISOString(),
             end_time: endTime.toISOString(),
             notes: ''
         };
 
         try {
-                        const res = await axios.post('/server/bookingsplus/api/v1/appointments/book', payload);
-            
-            if (res.data.success) {
-                // Return structured object similar to DB row for UI appending
+            const res = await appointmentsApi.book(payload);
+            if (res.data?.success) {
                 const newApt = {
-                    id: res.data.data.appointment_id,
+                    id: res.data.data?.appointment_id || res.data.data?.ROWID,
                     ...payload,
                     status: 'upcoming',
                     payment_status: 'unpaid',
@@ -94,19 +94,9 @@ const AddAppointmentModal = ({ isOpen, onClose, slotDetails, staffList, onAdded 
                 onClose();
             }
         } catch (err) {
-            console.error('Error creating appointment', err);
-            // Fallback for visual testing
-            const fallbackApt = {
-                id: `SU-${String(Date.now()).slice(-5)}`,
-                ...payload,
-                status: 'upcoming',
-                payment_status: 'unpaid',
-                price: selectedService.price || 'Free'
-            };
-            const existing = JSON.parse(localStorage.getItem('bp_appointments') || '[]');
-            localStorage.setItem('bp_appointments', JSON.stringify([...existing, fallbackApt]));
-            onAdded(fallbackApt);
-            onClose();
+            const errorMsg = err.data?.message || err.message || 'Failed to create appointment';
+            console.error('Error creating appointment:', errorMsg);
+            alert(`Error creating appointment: ${errorMsg}`);
         }
     };
 

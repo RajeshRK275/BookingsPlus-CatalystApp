@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button } from '../../ui/Button';
-import { Mail, MessageSquare, Calendar, Bell, BellRing } from 'lucide-react';
+import { Mail, MessageSquare, Calendar, BellRing } from 'lucide-react';
 
 const ToggleSwitch = ({ checked, onChange, disabled }) => (
     <div onClick={disabled ? undefined : onChange} style={{

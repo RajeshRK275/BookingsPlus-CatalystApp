@@ -7,8 +7,14 @@ const { TABLES } = require('../../core/constants');
 
 /**
  * Fetches all workspace memberships for a user, with role and workspace details.
+ * Returns empty array for temporary/unresolved users (e.g. during first-time setup).
  */
 const getUserWorkspaces = async (req, userId) => {
+    // Guard: Don't query workspaces for temporary users that aren't in the DB yet
+    if (!userId || String(userId).startsWith('temp-')) {
+        return [];
+    }
+
     try {
         const wsResult = await executeZCQL(req,
             `SELECT uw.workspace_id, uw.role_id, uw.status, w.workspace_name, w.workspace_slug, w.brand_color, w.logo_url, w.status as ws_status, r.role_name, r.role_level
@@ -29,6 +35,7 @@ const getUserWorkspaces = async (req, userId) => {
             role_id: (row.UserWorkspaces || row).role_id,
         }));
     } catch (e) {
+        console.warn('getUserWorkspaces query failed:', e.message);
         return [];
     }
 };
@@ -53,7 +60,8 @@ const formatUserResponse = (user) => ({
     user_id: user.user_id,
     catalyst_user_id: user.catalyst_user_id,
     email: user.email,
-    name: user.name,
+    name: user.display_name,
+    display_name: user.display_name,
     is_super_admin: user.is_super_admin,
     role_version: user.role_version,
     status: user.status,

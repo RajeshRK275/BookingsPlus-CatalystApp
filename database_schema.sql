@@ -38,11 +38,14 @@ CREATE TABLE Workspaces (
 );
 
 -- Users: Identity layer — workspace membership via UserWorkspaces
+-- NOTE: organization_id is a mandatory column in the Catalyst Data Store console.
+--       It links the user to the single Organization row for this deployment.
 CREATE TABLE Users (
     user_id             BIGINT PRIMARY KEY,
+    organization_id     BIGINT NOT NULL,       -- mandatory: references Organization.ROWID
     catalyst_user_id    VARCHAR(100),
     catalyst_role_id    VARCHAR(100),
-    name                VARCHAR(255),
+    display_name        VARCHAR(255),
     email               VARCHAR(255),
     phone               VARCHAR(50),
     avatar_url          VARCHAR(500),
@@ -115,7 +118,7 @@ CREATE TABLE UserRoleMapping (
 CREATE TABLE Services (
     service_id          BIGINT PRIMARY KEY,
     workspace_id        BIGINT,
-    name                VARCHAR(255),
+    service_name        VARCHAR(255),
     description         VARCHAR(1000),
     duration_minutes    INT,
     price               DECIMAL,
@@ -152,7 +155,7 @@ CREATE TABLE Availability (
 CREATE TABLE Customers (
     customer_id         BIGINT PRIMARY KEY,
     workspace_id        BIGINT,
-    name                VARCHAR(255),
+    customer_name       VARCHAR(255),
     email               VARCHAR(255),
     phone               VARCHAR(50),
     notes               VARCHAR(2000),
