@@ -1,8 +1,9 @@
 import React from 'react';
-import { Bell, Calendar, User, Settings, CheckSquare, LogOut } from 'lucide-react';
+import { Bell, Calendar, User, Settings, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { Link } from 'react-router-dom';
+import logo from '../assets/logo192.png';
 import './Topbar.css';
 
 const Topbar = ({ onToggleNotifications, notificationCount }) => {
@@ -14,7 +15,7 @@ const Topbar = ({ onToggleNotifications, notificationCount }) => {
     return (
         <header className="topbar">
             <div className="topbar-left" style={{ display: 'flex', alignItems: 'center', width: 'var(--pk-sidebar-width)' }}>
-                <CheckSquare className="brand-logo-icon" size={24} color="var(--pk-primary)" style={{ marginRight: '8px' }} />
+                <img src={logo} alt="BookingsPlus" className="brand-logo-icon" style={{ width: '28px', height: '28px', marginRight: '8px', borderRadius: '6px' }} />
                 <div className="brand-logo" style={{ margin: 0, color: 'var(--pk-text-main)' }}>Bookings+</div>
             </div>
 

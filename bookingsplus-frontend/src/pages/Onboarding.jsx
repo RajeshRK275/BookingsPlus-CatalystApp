@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { organizationsApi, servicesApi, usersApi } from '../services';
 import { STORAGE_KEYS } from '../constants';
+import logoImg from '../assets/logo192.png';
 
 /* ═══════════════════════════════════════════════════════════════════
    ONBOARDING WIZARD — Production-grade multi-step setup flow
@@ -755,7 +756,7 @@ const Onboarding = () => {
             }}>
                 <div style={{ padding: '0 32px', marginBottom: '48px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                        <CheckCircle2 size={24} color="#A78BFA" />
+                        <img src={logoImg} alt="BookingsPlus" style={{ width: '32px', height: '32px', borderRadius: '8px' }} />
                         <span style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '-0.01em' }}>Bookings+</span>
                     </div>
                     <p style={{ fontSize: '13px', color: '#9CA3AF', lineHeight: '1.5' }}>

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Clock, Calendar, Globe, ArrowLeft, Users } from 'lucide-react';
 import { servicesApi, appointmentsApi } from '../services';
+import logoImg from '../assets/logo192.png';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -191,7 +192,8 @@ const PublicBooking = () => {
                         </button>
                     )}
 
-                    <div style={{ padding: '8px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', backgroundColor: 'white', fontSize: '12px', fontWeight: 600, color: '#4B5563', display: 'inline-block', marginBottom: '16px' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', backgroundColor: 'white', fontSize: '12px', fontWeight: 600, color: '#4B5563', marginBottom: '16px' }}>
+                        <img src={logoImg} alt="BookingsPlus" style={{ width: '20px', height: '20px', borderRadius: '4px' }} />
                         BOOKINGS+
                     </div>
                     
