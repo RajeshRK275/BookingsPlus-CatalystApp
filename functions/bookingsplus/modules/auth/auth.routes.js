@@ -16,8 +16,6 @@ const authService = require('./auth.service');
  */
 router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
     // ── First-time setup scenario ──
-    // auth middleware sets _isTemporary=true when no Organization exists.
-    // Return early with a clean response — don't query workspaces/org tables.
     if (req.user._isTemporary) {
         return response.success(res, {
             user: authService.formatUserResponse(req.user),
@@ -26,10 +24,12 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
         });
     }
 
-    // ── Normal flow: Organization exists, user is persisted ──
+    // ── Normal flow: Run workspace fetch + setup check IN PARALLEL ──
     const userId = req.user.user_id || req.user.ROWID;
-    const workspaces = await authService.getUserWorkspaces(req, userId);
-    const setupCompleted = await authService.isSetupCompleted(req);
+    const [workspaces, setupCompleted] = await Promise.all([
+        authService.getUserWorkspaces(req, userId),
+        authService.isSetupCompleted(req),
+    ]);
 
     return response.success(res, {
         user: authService.formatUserResponse(req.user),

@@ -93,6 +93,10 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
     };
 
     const handleNext = () => {
+        if (!formData.name.trim()) {
+            alert('Service name is required.');
+            return;
+        }
         setStep(3);
     };
 
@@ -628,6 +632,21 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
                     </div>
                 </div>
 
+                {/* Validation Message for non-resource types */}
+                {serviceType !== 'resource' && selectedStaff.length === 0 && (
+                    <div style={{
+                        backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '10px',
+                        padding: '12px 16px', fontSize: '13px', color: '#92400E',
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                    }}>
+                        <span style={{ fontSize: '16px' }}>⚠️</span>
+                        <span>
+                            At least one employee must be assigned to {serviceType === 'collective' ? 'a collective' : serviceType === 'group' ? 'a group' : 'an'} {' '}
+                            service. {realStaff.length === 0 ? 'Add employees from the Employees page first.' : 'Select from the list above.'}
+                        </span>
+                    </div>
+                )}
+
                 {/* Actions */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
                     <Button variant="secondary" onClick={handleBack} style={{ padding: '10px 32px' }}>
@@ -635,9 +654,13 @@ export const CreateServiceModal = ({ isOpen, onClose, onServiceCreated }) => {
                     </Button>
                     <Button
                         variant="primary"
-                        style={{ padding: '10px 48px' }}
+                        style={{
+                            padding: '10px 48px',
+                            opacity: (serviceType !== 'resource' && selectedStaff.length === 0) ? 0.5 : 1,
+                            cursor: (serviceType !== 'resource' && selectedStaff.length === 0) ? 'not-allowed' : 'pointer',
+                        }}
                         onClick={handleCreateService}
-                        disabled={isCreating}
+                        disabled={isCreating || (serviceType !== 'resource' && selectedStaff.length === 0)}
                     >
                         {isCreating ? 'Creating...' : 'Create Service'}
                     </Button>

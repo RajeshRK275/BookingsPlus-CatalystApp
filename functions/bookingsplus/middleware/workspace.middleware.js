@@ -5,6 +5,10 @@
  * Validates the user has an active membership in UserWorkspaces for that workspace.
  * Super admins bypass the membership check.
  * Attaches req.workspaceId and req.userRole to the request.
+ * 
+ * IMPORTANT: Uses SEPARATE queries instead of JOINs to avoid the Catalyst ZCQL
+ * "No relationship between tables" error that occurs when table relationships
+ * aren't configured in the Data Store settings.
  */
 const { executeZCQL } = require('../utils/datastore');
 
@@ -48,14 +52,22 @@ const workspaceMiddleware = async (req, res, next) => {
             return next();
         }
 
-        // Validate user's membership in this workspace
+        // ── Validate user's membership using SEPARATE queries (no JOINs) ──
         const userId = req.user.user_id || req.user.ROWID;
-        const membershipResult = await executeZCQL(req,
-            `SELECT uw.ROWID, uw.role_id, uw.status, r.role_name, r.role_level 
-             FROM UserWorkspaces uw 
-             LEFT JOIN Roles r ON uw.role_id = r.ROWID 
-             WHERE uw.user_id = '${userId}' AND uw.workspace_id = '${workspaceId}'`
-        );
+
+        // Step 1: Check UserWorkspaces membership
+        let membershipResult;
+        try {
+            membershipResult = await executeZCQL(req,
+                `SELECT * FROM UserWorkspaces WHERE user_id = '${userId}' AND workspace_id = '${workspaceId}'`
+            );
+        } catch (e) {
+            console.error('[WorkspaceMiddleware] Membership query failed:', e.message);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to verify workspace membership: ' + e.message
+            });
+        }
 
         if (membershipResult.length === 0) {
             return res.status(403).json({
@@ -64,9 +76,7 @@ const workspaceMiddleware = async (req, res, next) => {
             });
         }
 
-        const membership = membershipResult[0];
-        const uwData = membership.UserWorkspaces || membership;
-        const roleData = membership.Roles || {};
+        const uwData = membershipResult[0].UserWorkspaces || membershipResult[0];
 
         if (uwData.status === 'suspended') {
             return res.status(403).json({
@@ -75,12 +85,30 @@ const workspaceMiddleware = async (req, res, next) => {
             });
         }
 
+        // Step 2: Fetch role details separately if role_id exists
+        let roleName = 'Staff';
+        let roleLevel = 0;
+        if (uwData.role_id) {
+            try {
+                const roleResult = await executeZCQL(req,
+                    `SELECT role_name, role_level FROM Roles WHERE ROWID = '${uwData.role_id}'`
+                );
+                if (roleResult.length > 0) {
+                    const role = roleResult[0].Roles || roleResult[0];
+                    roleName = role.role_name || 'Staff';
+                    roleLevel = parseInt(role.role_level) || 0;
+                }
+            } catch (roleErr) {
+                console.warn('[WorkspaceMiddleware] Role lookup failed (using defaults):', roleErr.message);
+            }
+        }
+
         req.workspaceId = workspaceId;
         req.workspace = workspace;
         req.userRole = {
             role_id: uwData.role_id,
-            role_name: roleData.role_name || 'Staff',
-            role_level: parseInt(roleData.role_level) || 0,
+            role_name: roleName,
+            role_level: roleLevel,
         };
 
         next();

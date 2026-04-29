@@ -1,5 +1,14 @@
 /**
  * Workspaces Service — Business logic for workspace management.
+ * 
+ * IMPORTANT: Catalyst ZCQL JOINs require explicit table relationships to be
+ * configured in the Data Store settings (Data Store → Relationships).
+ * If those relationships are missing, JOIN queries fail with:
+ *   "No relationship between tables X and Y"
+ * 
+ * To avoid this hard dependency, we use SEPARATE queries instead of JOINs.
+ * This is slightly less efficient but 100% reliable regardless of whether
+ * the admin has configured table relationships in the Catalyst console.
  */
 const { executeZCQL } = require('../../utils/datastore');
 const { TABLES } = require('../../core/constants');
@@ -7,46 +16,94 @@ const { TABLES } = require('../../core/constants');
 const getMyWorkspaces = async (req) => {
     const userId = req.user.user_id || req.user.ROWID;
 
-    // Super admins see all
+    // Super admins see all active workspaces
     if (req.user.is_super_admin) {
-        const allWs = await executeZCQL(req, `SELECT * FROM ${TABLES.WORKSPACES} WHERE status = 'active'`);
-        return allWs.map(row => {
-            const ws = row.Workspaces;
-            return {
+        try {
+            const allWs = await executeZCQL(req, `SELECT * FROM ${TABLES.WORKSPACES} WHERE status = 'active'`);
+            return allWs.map(row => {
+                const ws = row.Workspaces || row;
+                return {
+                    workspace_id: ws.ROWID,
+                    workspace_name: ws.workspace_name,
+                    workspace_slug: ws.workspace_slug,
+                    brand_color: ws.brand_color,
+                    logo_url: ws.logo_url,
+                    status: ws.status,
+                    role_name: 'Super Admin',
+                    role_level: 100,
+                };
+            });
+        } catch (err) {
+            console.warn('[WorkspacesService] Error fetching workspaces for super admin:', err.message);
+            // Table might be empty or missing — return empty array (not an error)
+            return [];
+        }
+    }
+
+    // ── Regular users: fetch memberships using SEPARATE queries ──
+    // Step 1: Get user's workspace memberships from UserWorkspaces
+    let memberships = [];
+    try {
+        const uwResult = await executeZCQL(req,
+            `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${userId}' AND status = 'active'`
+        );
+        memberships = uwResult.map(row => row.UserWorkspaces || row);
+    } catch (err) {
+        console.warn('[WorkspacesService] Error fetching user workspace memberships:', err.message);
+        return [];
+    }
+
+    if (memberships.length === 0) return [];
+
+    // Step 2: Fetch workspace details for each membership
+    const workspaces = [];
+    for (const membership of memberships) {
+        const wsId = membership.workspace_id;
+        if (!wsId) continue;
+
+        try {
+            const wsResult = await executeZCQL(req,
+                `SELECT * FROM ${TABLES.WORKSPACES} WHERE ROWID = '${wsId}' AND status = 'active'`
+            );
+            if (wsResult.length === 0) continue;
+
+            const ws = wsResult[0].Workspaces || wsResult[0];
+
+            // Step 3: Fetch role details if role_id exists
+            let roleName = 'Staff';
+            let roleLevel = 0;
+            if (membership.role_id) {
+                try {
+                    const roleResult = await executeZCQL(req,
+                        `SELECT role_name, role_level FROM ${TABLES.ROLES} WHERE ROWID = '${membership.role_id}'`
+                    );
+                    if (roleResult.length > 0) {
+                        const role = roleResult[0].Roles || roleResult[0];
+                        roleName = role.role_name || 'Staff';
+                        roleLevel = parseInt(role.role_level) || 0;
+                    }
+                } catch (roleErr) {
+                    console.warn('[WorkspacesService] Error fetching role:', roleErr.message);
+                }
+            }
+
+            workspaces.push({
                 workspace_id: ws.ROWID,
                 workspace_name: ws.workspace_name,
                 workspace_slug: ws.workspace_slug,
                 brand_color: ws.brand_color,
                 logo_url: ws.logo_url,
                 status: ws.status,
-                role_name: 'Super Admin',
-                role_level: 100,
-            };
-        });
+                role_name: roleName,
+                role_level: roleLevel,
+                role_id: membership.role_id,
+            });
+        } catch (wsErr) {
+            console.warn(`[WorkspacesService] Error fetching workspace ${wsId}:`, wsErr.message);
+        }
     }
 
-    // Regular users see memberships
-    const result = await executeZCQL(req,
-        `SELECT uw.workspace_id, uw.role_id, uw.status as uw_status, 
-                w.workspace_name, w.workspace_slug, w.brand_color, w.logo_url, w.status as ws_status,
-                r.role_name, r.role_level
-         FROM ${TABLES.USER_WORKSPACES} uw
-         LEFT JOIN ${TABLES.WORKSPACES} w ON uw.workspace_id = w.ROWID
-         LEFT JOIN ${TABLES.ROLES} r ON uw.role_id = r.ROWID
-         WHERE uw.user_id = '${userId}' AND uw.status = 'active'`
-    );
-
-    return result.map(row => ({
-        workspace_id: (row.UserWorkspaces || row).workspace_id,
-        workspace_name: (row.Workspaces || row).workspace_name,
-        workspace_slug: (row.Workspaces || row).workspace_slug,
-        brand_color: (row.Workspaces || row).brand_color,
-        logo_url: (row.Workspaces || row).logo_url,
-        status: (row.Workspaces || row).ws_status || (row.Workspaces || row).status,
-        role_name: (row.Roles || row).role_name || 'Staff',
-        role_level: parseInt((row.Roles || row).role_level) || 0,
-        role_id: (row.UserWorkspaces || row).role_id,
-    })).filter(ws => ws.status === 'active');
+    return workspaces;
 };
 
 const getById = async (req, wsId) => {

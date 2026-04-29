@@ -43,9 +43,21 @@ router.post('/', async (req, res, next) => {
 
         const datastore = getDatastore(req);
         // created_by is BIGINT — must be numeric, not 'temp-xxx' strings
+        // Resolve organization_id
+        let organizationId = 0;
+        if (req.organizationId) {
+            organizationId = toBigInt(req.organizationId);
+        } else {
+            try {
+                const orgResult = await executeZCQL(req, 'SELECT ROWID FROM Organization LIMIT 1');
+                if (orgResult.length > 0) organizationId = toBigInt(orgResult[0].Organization.ROWID);
+            } catch (e) { /* ignore */ }
+        }
+
         const createdByUserId = toBigInt(req.user.ROWID || req.user.user_id);
         const wsRow = await datastore.table('Workspaces').insertRow({
             workspace_id: Date.now(),
+            organization_id: organizationId,
             workspace_name,
             workspace_slug: slug,
             description: description || '',

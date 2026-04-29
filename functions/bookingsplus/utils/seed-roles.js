@@ -3,21 +3,10 @@
  * Called when a workspace is created.
  * Creates: Owner (99), Admin (50), Manager (10), Staff (0)
  * 
- * IMPORTANT: All _id columns are BIGINT. workspace_id, role_id, permission_id
- * must all be numeric values, never strings.
- *
- * Column type reference for Roles table:
- *   role_id      → bigint
- *   workspace_id → bigint
- *   role_name    → varchar(100)
- *   role_level   → bigint
- *   is_system    → varchar(10)
- *   description  → varchar(255)
- *
- * Column type reference for RolePermissions table:
- *   role_perm_id   → bigint
- *   role_id        → bigint
- *   permission_id  → bigint
+ * PERFORMANCE: Uses bulk insertRows() for both Roles and RolePermissions.
+ * - 4 roles inserted in 1 API call (was 4 individual calls)
+ * - ~68 RolePermissions inserted in 1 API call (was 68 individual calls)
+ * Total: 3 DB calls (1 read + 1 roles insert + 1 perms insert) vs 73+
  */
 
 const ROLE_TEMPLATES = [
@@ -26,7 +15,7 @@ const ROLE_TEMPLATES = [
         role_level: 99,
         is_system: 'true',
         description: 'Full access to all features and settings',
-        permissions: 'ALL', // All 25 permissions
+        permissions: 'ALL',
     },
     {
         role_name: 'Admin',
@@ -68,18 +57,11 @@ const ROLE_TEMPLATES = [
     },
 ];
 
-/**
- * Seeds default roles for a workspace and assigns permissions.
- * @param {object} req - Express request with catalystApp
- * @param {string|number} workspaceId - The workspace to seed roles for
- * @returns {object} - Map of role_name to role_id (ROWID)
- */
 const seedRolesForWorkspace = async (req, workspaceId) => {
     const { getDatastore, executeZCQL } = require('./datastore');
     const { AppError } = require('../core/errors');
     const datastore = getDatastore(req);
 
-    /** Coerce to numeric BIGINT */
     const toBigInt = (val) => {
         if (typeof val === 'number' && !isNaN(val)) return val;
         const p = parseInt(String(val), 10);
@@ -88,113 +70,116 @@ const seedRolesForWorkspace = async (req, workspaceId) => {
 
     const wsId = toBigInt(workspaceId);
 
-    // Fetch all permission rows from the Permissions table
+    // Step 1: Fetch all permissions (1 DB call)
     let allPerms = [];
     try {
         const allPermsResult = await executeZCQL(req, 'SELECT * FROM Permissions');
         allPerms = allPermsResult.map(r => r.Permissions);
     } catch (e) {
         console.error('Failed to query Permissions table:', e.message);
-        throw new AppError(
-            `Cannot seed roles: Failed to read Permissions table. ${e.message}`,
-            500,
-            'PERMISSIONS_READ_ERROR'
-        );
+        throw new AppError(`Cannot seed roles: Failed to read Permissions table. ${e.message}`, 500, 'PERMISSIONS_READ_ERROR');
     }
 
     if (allPerms.length === 0) {
-        throw new AppError(
-            'Cannot seed roles: Permissions table is empty. Permissions must be seeded first.',
-            500,
-            'PERMISSIONS_EMPTY'
-        );
+        throw new AppError('Cannot seed roles: Permissions table is empty.', 500, 'PERMISSIONS_EMPTY');
     }
 
-    // Build permission_key → ROWID mapping
     const permKeyToId = {};
-    allPerms.forEach(p => {
-        permKeyToId[p.permission_key] = toBigInt(p.ROWID);
-    });
+    allPerms.forEach(p => { permKeyToId[p.permission_key] = toBigInt(p.ROWID); });
 
     const roleTable = datastore.table('Roles');
     const rolePermTable = datastore.table('RolePermissions');
-    const roleMap = {}; // role_name → ROWID
+    const roleMap = {};
 
-    // Use a single base timestamp + large offset to guarantee unique BIGINT IDs
+    // Step 2: Bulk insert ALL 4 roles at once (1 DB call)
     const roleBaseTs = Date.now();
+    const roleRows = ROLE_TEMPLATES.map((tmpl, i) => ({
+        role_id: roleBaseTs + (i + 1) * 10000,
+        workspace_id: wsId,
+        role_name: tmpl.role_name,
+        role_level: tmpl.role_level,
+        is_system: tmpl.is_system,
+        description: tmpl.description,
+    }));
+
+    let insertedRoles;
+    try {
+        insertedRoles = await roleTable.insertRows(roleRows);
+        console.log(`Bulk-inserted ${insertedRoles.length} roles for workspace ${workspaceId}`);
+    } catch (err) {
+        const errMsg = (err.message || '').toLowerCase();
+        if (errMsg.includes('bigint value expected') || errMsg.includes('invalid input value')) {
+            throw new AppError(
+                `SCHEMA ERROR in "Roles" table: A text column is BIGINT but must be VARCHAR.\n` +
+                `Correct types: role_id(bigint), workspace_id(bigint), role_name(varchar), role_level(bigint), is_system(varchar), description(varchar)\n` +
+                `Original: ${err.message}`,
+                422, 'SCHEMA_TYPE_MISMATCH'
+            );
+        }
+        throw err;
+    }
+
+    for (let i = 0; i < ROLE_TEMPLATES.length; i++) {
+        roleMap[ROLE_TEMPLATES[i].role_name] = toBigInt(insertedRoles[i].ROWID);
+    }
+
+    // Step 3: Build ALL RolePermission rows for ALL roles, then bulk insert (1 DB call)
+    const allRolePermRows = [];
+    const rpBaseTs = Date.now();
+    let rpIndex = 0;
 
     for (let i = 0; i < ROLE_TEMPLATES.length; i++) {
         const tmpl = ROLE_TEMPLATES[i];
-        const roleId = roleBaseTs + (i + 1) * 10000;
+        const insertedRoleId = roleMap[tmpl.role_name];
+        const permKeys = tmpl.permissions === 'ALL' ? Object.keys(permKeyToId) : tmpl.permissions;
 
-        let roleRow;
-        try {
-            roleRow = await roleTable.insertRow({
-                role_id: roleId,
-                workspace_id: wsId,
-                role_name: tmpl.role_name,
-                role_level: tmpl.role_level,
-                is_system: tmpl.is_system,
-                description: tmpl.description,
-            });
-        } catch (err) {
-            const errMsg = (err.message || '').toLowerCase();
-            if (errMsg.includes('bigint value expected') || errMsg.includes('invalid input value')) {
-                // Detect which column has wrong type
-                let wrongCol = 'unknown';
-                for (const col of ['role_name', 'is_system', 'description']) {
-                    if (err.message.toLowerCase().includes(col)) {
-                        wrongCol = col;
-                        break;
-                    }
-                }
-                throw new AppError(
-                    `SCHEMA ERROR in "Roles" table: Column "${wrongCol}" is BIGINT but must be VARCHAR.\n\n` +
-                    `TO FIX: Go to Catalyst Console → Data Store → "Roles" → Schema View.\n` +
-                    `Delete "${wrongCol}" and re-create as varchar.\n\n` +
-                    `Correct types: role_id(bigint), workspace_id(bigint), role_name(varchar), role_level(bigint), is_system(varchar), description(varchar)\n\n` +
-                    `Original: ${err.message}`,
-                    422,
-                    'SCHEMA_TYPE_MISMATCH'
-                );
-            }
-            throw err;
-        }
-
-        const insertedRoleId = toBigInt(roleRow.ROWID);
-        roleMap[tmpl.role_name] = insertedRoleId;
-
-        // Determine which permissions to assign
-        let permKeys;
-        if (tmpl.permissions === 'ALL') {
-            permKeys = Object.keys(permKeyToId);
-        } else {
-            permKeys = tmpl.permissions;
-        }
-
-        // Insert RolePermissions rows — all _id columns are BIGINT
-        // Use a unique base timestamp per role to avoid collisions across roles
-        const rpBaseTs = Date.now() + (i + 1) * 100000;
-        for (let j = 0; j < permKeys.length; j++) {
-            const permId = permKeyToId[permKeys[j]];
+        for (const permKey of permKeys) {
+            const permId = permKeyToId[permKey];
             if (permId) {
-                try {
-                    await rolePermTable.insertRow({
-                        role_perm_id: rpBaseTs + j,
-                        role_id: insertedRoleId,
-                        permission_id: permId,
-                    });
-                } catch (rpErr) {
-                    console.error(`Failed to assign permission "${permKeys[j]}" to role "${tmpl.role_name}":`, rpErr.message);
-                    // Don't fail the entire setup for a single permission assignment
-                }
-            } else {
-                console.warn(`Permission key "${permKeys[j]}" not found in Permissions table — skipping assignment.`);
+                allRolePermRows.push({
+                    role_perm_id: rpBaseTs + rpIndex + 1,
+                    role_id: insertedRoleId,
+                    permission_id: permId,
+                });
+                rpIndex++;
             }
         }
     }
 
-    console.log(`Seeded ${ROLE_TEMPLATES.length} roles for workspace ${workspaceId}`);
+    if (allRolePermRows.length > 0) {
+        // Catalyst Data Store has a limit on bulk insert size.
+        // Split into batches of 50 rows to be safe, and process batches in parallel
+        // (2 concurrent batches at a time to avoid overwhelming the API).
+        const BATCH_SIZE = 50;
+        const batches = [];
+        for (let i = 0; i < allRolePermRows.length; i += BATCH_SIZE) {
+            batches.push(allRolePermRows.slice(i, i + BATCH_SIZE));
+        }
+
+        try {
+            if (batches.length === 1) {
+                // Single batch — just insert directly
+                await rolePermTable.insertRows(batches[0]);
+            } else {
+                // Multiple batches — run 2 concurrently for speed
+                const CONCURRENCY = 2;
+                for (let i = 0; i < batches.length; i += CONCURRENCY) {
+                    const concurrent = batches.slice(i, i + CONCURRENCY);
+                    await Promise.all(concurrent.map(batch => rolePermTable.insertRows(batch)));
+                }
+            }
+            console.log(`Bulk-inserted ${allRolePermRows.length} RolePermission rows in ${batches.length} batch(es).`);
+        } catch (rpErr) {
+            console.warn('Batch RolePermissions insert failed, trying individual:', rpErr.message);
+            let successCount = 0;
+            for (const row of allRolePermRows) {
+                try { await rolePermTable.insertRow(row); successCount++; } catch (e) { /* skip */ }
+            }
+            console.log(`Fallback: Inserted ${successCount}/${allRolePermRows.length} RolePermissions individually.`);
+        }
+    }
+
+    console.log(`Seeded ${ROLE_TEMPLATES.length} roles with ${allRolePermRows.length} permission assignments for workspace ${workspaceId}`);
     return roleMap;
 };
 

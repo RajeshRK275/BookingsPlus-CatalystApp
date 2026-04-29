@@ -16,40 +16,81 @@ const toBigInt = (value) => {
     return Date.now();
 };
 
+/**
+ * Get all users in a workspace using SEPARATE queries (no JOINs).
+ * 
+ * IMPORTANT: Catalyst ZCQL JOINs require explicit table relationships to be
+ * configured in the Data Store settings. If those relationships are missing,
+ * JOIN queries fail with "No relationship between tables X and Y".
+ * We use separate queries to avoid this hard dependency.
+ */
 const getWorkspaceUsers = async (req) => {
-    const result = await executeWorkspaceScopedZCQL(req,
-        `SELECT uw.user_id, uw.role_id, uw.status as membership_status, 
-                u.display_name, u.email, u.phone, u.designation, u.gender, u.dob, u.color, u.initials, u.status, u.catalyst_user_id, u.is_super_admin,
-                r.role_name, r.role_level
-         FROM ${TABLES.USER_WORKSPACES} uw
-         LEFT JOIN ${TABLES.USERS} u ON uw.user_id = u.ROWID
-         LEFT JOIN ${TABLES.ROLES} r ON uw.role_id = r.ROWID
-         WHERE uw.workspace_id = '${req.workspaceId}' AND uw.status = 'active'`
+    // Step 1: Get all active memberships in this workspace
+    const uwResult = await executeWorkspaceScopedZCQL(req,
+        `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE workspace_id = '${req.workspaceId}' AND status = 'active'`
     );
 
-    return result.map(row => {
-        const uw = row.UserWorkspaces || {};
-        const u = row.Users || {};
-        const r = row.Roles || {};
-        return {
-            id: uw.user_id,
-            user_id: uw.user_id,
-            name: u.display_name,
-            email: u.email,
-            phone: u.phone,
-            designation: u.designation,
-            gender: u.gender,
-            dob: u.dob,
-            color: u.color || '#E0E7FF',
-            initials: u.initials,
-            status: u.status,
-            is_super_admin: u.is_super_admin,
-            role: r.role_name || 'Staff',
-            role_name: r.role_name || 'Staff',
-            role_level: parseInt(r.role_level) || 0,
+    const memberships = uwResult.map(row => row.UserWorkspaces || row);
+    if (memberships.length === 0) return [];
+
+    // Step 2: For each membership, fetch user details and role details separately
+    const users = [];
+    for (const uw of memberships) {
+        const userId = uw.user_id;
+        if (!userId) continue;
+
+        // Fetch user details
+        let userInfo = {};
+        try {
+            const userResult = await executeZCQL(req,
+                `SELECT * FROM ${TABLES.USERS} WHERE ROWID = '${userId}'`
+            );
+            if (userResult.length > 0) {
+                userInfo = userResult[0].Users || userResult[0];
+            }
+        } catch (e) {
+            console.warn(`[UsersService] Failed to fetch user ${userId}:`, e.message);
+        }
+
+        // Fetch role details
+        let roleName = 'Staff';
+        let roleLevel = 0;
+        if (uw.role_id) {
+            try {
+                const roleResult = await executeZCQL(req,
+                    `SELECT role_name, role_level FROM ${TABLES.ROLES} WHERE ROWID = '${uw.role_id}'`
+                );
+                if (roleResult.length > 0) {
+                    const role = roleResult[0].Roles || roleResult[0];
+                    roleName = role.role_name || 'Staff';
+                    roleLevel = parseInt(role.role_level) || 0;
+                }
+            } catch (e) {
+                console.warn(`[UsersService] Failed to fetch role ${uw.role_id}:`, e.message);
+            }
+        }
+
+        users.push({
+            id: userId,
+            user_id: userId,
+            name: userInfo.display_name,
+            email: userInfo.email,
+            phone: userInfo.phone,
+            designation: userInfo.designation,
+            gender: userInfo.gender,
+            dob: userInfo.dob,
+            color: userInfo.color || '#E0E7FF',
+            initials: userInfo.initials,
+            status: userInfo.status,
+            is_super_admin: userInfo.is_super_admin,
+            role: roleName,
+            role_name: roleName,
+            role_level: roleLevel,
             role_id: uw.role_id,
-        };
-    });
+        });
+    }
+
+    return users;
 };
 
 const createAndAssign = async (req, data) => {
@@ -125,14 +166,14 @@ const createAndAssign = async (req, data) => {
     let assignedRoleId = role_id;
     if (!assignedRoleId) {
         const staffRoleResult = await executeWorkspaceScopedZCQL(req,
-            `SELECT ROWID FROM ${TABLES.ROLES} WHERE workspace_id = '${req.workspaceId}' AND role_name = 'Staff'`
+            `SELECT ${TABLES.ROLES}.ROWID FROM ${TABLES.ROLES} WHERE ${TABLES.ROLES}.workspace_id = '${req.workspaceId}' AND ${TABLES.ROLES}.role_name = 'Staff'`
         );
         assignedRoleId = staffRoleResult.length > 0 ? staffRoleResult[0].Roles.ROWID : null;
     }
 
     // Check existing membership
     const existingMembership = await executeWorkspaceScopedZCQL(req,
-        `SELECT ROWID FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${userRowId}' AND workspace_id = '${req.workspaceId}'`
+        `SELECT ${TABLES.USER_WORKSPACES}.ROWID FROM ${TABLES.USER_WORKSPACES} WHERE ${TABLES.USER_WORKSPACES}.user_id = '${userRowId}' AND ${TABLES.USER_WORKSPACES}.workspace_id = '${req.workspaceId}'`
     );
 
     if (existingMembership.length > 0) {
@@ -182,7 +223,7 @@ const updateUser = async (req, userId, updateData) => {
 
 const removeFromWorkspace = async (req, userId) => {
     const membership = await executeWorkspaceScopedZCQL(req,
-        `SELECT ROWID FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${userId}' AND workspace_id = '${req.workspaceId}'`
+        `SELECT ${TABLES.USER_WORKSPACES}.ROWID FROM ${TABLES.USER_WORKSPACES} WHERE ${TABLES.USER_WORKSPACES}.user_id = '${userId}' AND ${TABLES.USER_WORKSPACES}.workspace_id = '${req.workspaceId}'`
     );
 
     if (membership.length === 0) {

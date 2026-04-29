@@ -138,50 +138,32 @@ const authMiddleware = async (req, res, next) => {
         const catalystEmail = catalystUser.email_id;
         const catalystName = `${catalystUser.first_name || ''} ${catalystUser.last_name || ''}`.trim() || catalystEmail.split('@')[0];
 
-        // ── Check if Organization exists ──
-        const organizationId = await getOrganizationId(req);
+        // ── PARALLEL: Check org + user at the same time to save latency ──
+        const [organizationId, userRows] = await Promise.all([
+            getOrganizationId(req),
+            executeZCQL(req, `SELECT * FROM Users WHERE catalyst_user_id = '${catalystUserId}'`).catch(() => []),
+        ]);
 
         // ══════════════════════════════════════════════════════════════
         // FIRST-TIME SETUP: No Organization exists yet.
-        // The user is authenticated via Catalyst but we CANNOT create
-        // a Users row because organization_id is mandatory.
-        // Pass them through with a temporary in-memory user object
-        // so they can complete the /organizations/setup flow.
         // ══════════════════════════════════════════════════════════════
         if (!organizationId) {
             console.log('No organization found — first-time setup mode for:', catalystEmail);
 
-            // Check if user already exists in DB (edge case: org was deleted but users remain)
-            let existingUser = null;
-            try {
-                const rows = await executeZCQL(req,
-                    `SELECT * FROM Users WHERE catalyst_user_id = '${catalystUserId}'`
-                );
-                if (rows.length > 0) existingUser = rows[0].Users;
-            } catch (e) { /* Users table might not have data yet */ }
+            const existingUser = userRows.length > 0 ? userRows[0].Users : null;
 
-            if (!existingUser) {
-                try {
-                    const rows = await executeZCQL(req,
-                        `SELECT * FROM Users WHERE email = '${catalystEmail}'`
-                    );
-                    if (rows.length > 0) existingUser = rows[0].Users;
-                } catch (e) { /* ignore */ }
-            }
-
-            // Provide a temporary in-memory user — NOT persisted to DB yet
             req.user = {
                 user_id: existingUser ? (existingUser.user_id || existingUser.ROWID) : `temp-${catalystUserId}`,
                 catalyst_user_id: catalystUserId,
                 catalyst_role_id: catalystUser.role_id ? String(catalystUser.role_id) : '',
                 email: existingUser ? existingUser.email : catalystEmail,
                 display_name: existingUser ? existingUser.display_name : catalystName,
-                is_super_admin: true,  // First user is always super admin during setup
+                is_super_admin: true,
                 role_version: 0,
                 status: 'active',
                 ROWID: existingUser ? existingUser.ROWID : null,
-                _isTemporary: true,    // Flag: user row not yet persisted
-                _needsDbInsert: !existingUser, // Flag: needs to be inserted after org setup
+                _isTemporary: true,
+                _needsDbInsert: !existingUser,
             };
 
             return next();
@@ -190,23 +172,12 @@ const authMiddleware = async (req, res, next) => {
         // ══════════════════════════════════════════════════════════════
         // NORMAL FLOW: Organization exists — proceed with DB lookup/insert
         // ══════════════════════════════════════════════════════════════
-
-        // ── Lookup user in our Users table ──
-        let userRows;
-        try {
-            userRows = await executeZCQL(req,
-                `SELECT * FROM Users WHERE catalyst_user_id = '${catalystUserId}'`
-            );
-        } catch (e) {
-            userRows = [];
-        }
-
         let localUser;
 
         if (userRows.length > 0) {
             localUser = userRows[0].Users;
         } else {
-            // ── Auto-provision: First time this Catalyst user logs in ──
+            // User not found by catalyst_user_id — check by email
             let preExisting = [];
             try {
                 preExisting = await executeZCQL(req,
@@ -227,7 +198,7 @@ const authMiddleware = async (req, res, next) => {
                     console.error('Failed to link catalyst_user_id to existing user:', updateErr.message);
                 }
             } else {
-                // Organization exists — safe to insert with valid organization_id
+                // Auto-provision new user
                 const datastore = getDatastore(req);
                 const isSuperAdmin = config.initialSuperAdminEmail &&
                     catalystEmail.toLowerCase() === config.initialSuperAdminEmail.toLowerCase();
@@ -239,7 +210,7 @@ const authMiddleware = async (req, res, next) => {
                     display_name: catalystName,
                     email: catalystEmail,
                     phone: '',
-                    organization_id: toBigInt(organizationId), // BIGINT — must be numeric
+                    organization_id: toBigInt(organizationId),
                     is_super_admin: isSuperAdmin ? 'true' : 'false',
                     role_version: 0,
                     status: 'active',
@@ -251,36 +222,36 @@ const authMiddleware = async (req, res, next) => {
             }
         }
 
-        // ── Check role_version staleness (admin-driven session invalidation) ──
-        try {
-            const mappingResult = await executeZCQL(req,
-                `SELECT * FROM UserRoleMapping WHERE catalyst_user_id = '${catalystUserId}'`
-            );
-            if (mappingResult.length > 0) {
-                const mapping = mappingResult[0].UserRoleMapping;
-                const mappingVersion = parseInt(mapping.role_version) || 0;
-                const userVersion = parseInt(localUser.role_version) || 0;
-
-                if (mappingVersion > userVersion) {
-                    try {
-                        const datastore = getDatastore(req);
-                        await datastore.table('Users').updateRow({
-                            ROWID: localUser.ROWID,
-                            catalyst_role_id: mapping.catalyst_role_id || '',
-                            role_version: mappingVersion,
-                        });
-                        localUser.catalyst_role_id = mapping.catalyst_role_id;
-                        localUser.role_version = mappingVersion;
-                    } catch (syncErr) {
-                        console.error('Role version sync failed:', syncErr.message);
-                    }
+        // ══════════════════════════════════════════════════════════════
+        // SUPER ADMIN AUTO-FIX (only for the first/only user in the system)
+        // This is a blocking check because req.user.is_super_admin is set
+        // based on localUser.is_super_admin right after this block.
+        // The DB update is fire-and-forget to save latency.
+        // ══════════════════════════════════════════════════════════════
+        if (localUser.is_super_admin !== 'true') {
+            try {
+                const allUsersCount = await executeZCQL(req, `SELECT COUNT(ROWID) FROM Users`);
+                const totalUsers = parseInt(
+                    (allUsersCount[0]?.Users?.ROWID || allUsersCount[0]?.Users?.['ROWID.count'] || '0'), 10
+                );
+                if (totalUsers <= 1) {
+                    console.log(`[Auth] Auto-promoting ${catalystEmail} to super_admin (only user in system)`);
+                    localUser.is_super_admin = 'true';
+                    // Fire-and-forget: persist in background, don't block the request
+                    getDatastore(req).table('Users').updateRow({
+                        ROWID: localUser.ROWID,
+                        is_super_admin: 'true',
+                    }).catch(e => console.error('[Auth] Failed to persist super admin flag:', e.message));
                 }
+            } catch (countErr) {
+                console.warn('[Auth] Could not count users for super admin check:', countErr.message);
             }
-        } catch (e) {
-            // UserRoleMapping table might not exist yet — ignore
         }
 
-        // ── Attach authenticated user to request ──
+        // ── Attach authenticated user + organizationId to request ──
+        // NOTE: Removed the UserRoleMapping query — that table doesn't exist
+        // and was causing an unnecessary DB call on every request.
+        req.organizationId = organizationId;
         req.user = {
             user_id: localUser.user_id || localUser.ROWID,
             catalyst_user_id: catalystUserId,

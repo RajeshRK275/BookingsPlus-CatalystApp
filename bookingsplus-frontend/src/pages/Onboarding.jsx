@@ -24,8 +24,8 @@ import logoImg from '../assets/logo192.png';
 const STEPS = [
     { id: 'organization', label: 'Organization', icon: Building2, description: 'Name your business' },
     { id: 'hours', label: 'Business Hours', icon: Clock, description: 'Set your availability' },
-    { id: 'service', label: 'First Service', icon: Briefcase, description: 'Create a bookable service' },
     { id: 'staff', label: 'Staff', icon: Users, description: 'Add your team' },
+    { id: 'service', label: 'First Service', icon: Briefcase, description: 'Create a bookable service' },
     { id: 'complete', label: 'All Set!', icon: CheckCircle2, description: 'You\'re ready to go' },
 ];
 
@@ -517,15 +517,15 @@ const StepComplete = ({ data }) => {
                 <SummaryRow icon={<Building2 size={18} color="#5C44B5" />} label="Organization" value={data.orgName} />
                 <SummaryRow icon={<Clock size={18} color="#D97706" />} label="Business Hours"
                     value={`${data.hours.filter(h => h.enabled).length} days configured`} />
-                {serviceCreated ? (
-                    <SummaryRow icon={<Briefcase size={18} color="#16A34A" />} label="First Service" value={data.service.name} />
-                ) : (
-                    <SummaryRow icon={<Briefcase size={18} color="#9CA3AF" />} label="First Service" value="Skipped — add later" muted />
-                )}
                 {staffAdded > 0 ? (
                     <SummaryRow icon={<Users size={18} color="#2563EB" />} label="Staff Members" value={`${staffAdded} member${staffAdded > 1 ? 's' : ''} invited`} />
                 ) : (
                     <SummaryRow icon={<Users size={18} color="#9CA3AF" />} label="Staff Members" value="Skipped — add later" muted />
+                )}
+                {serviceCreated ? (
+                    <SummaryRow icon={<Briefcase size={18} color="#16A34A" />} label="First Service" value={`${data.service.name} (with staff assigned)`} />
+                ) : (
+                    <SummaryRow icon={<Briefcase size={18} color="#9CA3AF" />} label="First Service" value="Skipped — add later" muted />
                 )}
             </div>
         </div>
@@ -614,6 +614,9 @@ const Onboarding = () => {
         }
     }, [currentStep]);
 
+    // Track staff created during onboarding so we can assign them to services
+    const [createdStaffIds, setCreatedStaffIds] = useState([]);
+
     const validateStep = (step) => {
         switch (step) {
             case 0:
@@ -623,16 +626,16 @@ const Onboarding = () => {
                 }
                 break;
             case 2:
-                // Service is optional — no validation needed
-                break;
-            case 3:
                 // Staff is optional — but validate emails if provided
                 for (const staff of data.staffList) {
                     if (staff.email.trim() && !staff.email.includes('@')) {
-                        setStepErrors({ 3: `Invalid email: ${staff.email}` });
+                        setStepErrors({ 2: `Invalid email: ${staff.email}` });
                         return false;
                     }
                 }
+                break;
+            case 3:
+                // Service is optional — no validation needed
                 break;
             default:
                 break;
@@ -649,12 +652,60 @@ const Onboarding = () => {
         if (currentStep === 0 && !orgCreated) {
             setSubmitting(true);
             try {
-                const res = await organizationsApi.setup({
-                    organization_name: data.orgName.trim(),
-                    workspace_name: (data.wsName || data.orgName).trim(),
-                    timezone: data.timezone,
-                    currency: data.currency,
-                });
+                // Retry logic: Catalyst cold starts can cause the first request to timeout.
+                // If the first attempt times out, retry once — the function will be warm.
+                let res;
+                let lastError;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    try {
+                        console.log(`[Onboarding] Setup attempt ${attempt}/2...`);
+                        res = await organizationsApi.setup({
+                            organization_name: data.orgName.trim(),
+                            workspace_name: (data.wsName || data.orgName).trim(),
+                            timezone: data.timezone,
+                            currency: data.currency,
+                        });
+                        lastError = null;
+                        break; // Success — exit retry loop
+                    } catch (attemptErr) {
+                        lastError = attemptErr;
+                        const errMsg = attemptErr.data?.message || attemptErr.message || '';
+                        const isTimeout = errMsg.toLowerCase().includes('timeout');
+                        const isNetwork = errMsg.toLowerCase().includes('network');
+
+                        // If it's a conflict (org already exists), the first attempt partially succeeded
+                        const isConflict = attemptErr.status === 409;
+                        if (isConflict) {
+                            console.log('[Onboarding] Org already exists (409) — first attempt succeeded partially. Proceeding...');
+                            // Org was created but response was lost. Try to get org details.
+                            try {
+                                const orgRes = await organizationsApi.get();
+                                if (orgRes.data?.success && orgRes.data?.data?.data) {
+                                    res = { data: { data: { organization: orgRes.data.data.data, workspace: null } } };
+                                    lastError = null;
+                                }
+                            } catch (e) {
+                                // Even if we can't get org details, the org exists — treat as success
+                                res = { data: { data: { organization: {}, workspace: null } } };
+                                lastError = null;
+                            }
+                            break;
+                        }
+
+                        if ((isTimeout || isNetwork) && attempt < 2) {
+                            console.warn(`[Onboarding] Setup attempt ${attempt} timed out — retrying in 3s...`);
+                            setError('Server is starting up (first launch takes longer). Retrying...');
+                            await new Promise(resolve => setTimeout(resolve, 3000));
+                            setError(null);
+                            continue;
+                        }
+
+                        // Non-timeout error or last attempt — throw
+                        throw attemptErr;
+                    }
+                }
+
+                if (lastError) throw lastError;
 
                 const resData = res.data?.data || res.data || {};
                 const wsSlug = resData.workspace?.workspace_slug ||
@@ -663,15 +714,39 @@ const Onboarding = () => {
                 setOrgCreated(true);
 
                 // Set active workspace in localStorage for API calls (needed for service/user creation)
+                // The API interceptor reads this value and sends it as X-Workspace-Id header
                 const wsId = resData.workspace?.ROWID || resData.workspace?.workspace_id;
                 if (wsId) {
                     localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE, String(wsId));
+                    console.log('Onboarding: Workspace ID stored in localStorage:', wsId);
+                } else {
+                    console.warn('Onboarding: No workspace ID returned from setup API. Service/staff creation may fail.');
                 }
 
-                // Refresh auth + workspace contexts to pick up new state
+                // Mark setup as completed in AuthContext first — this is critical because:
+                // 1. It sets setupCompleted=true → needsOnboarding becomes false
+                // 2. WorkspaceContext watches needsOnboarding — when it becomes false, 
+                //    it triggers a workspace fetch
+                // 3. refreshUser re-fetches /auth/me which now returns setupCompleted=true
                 markSetupComplete();
                 await refreshUser();
+
+                // Give WorkspaceContext a moment to react to the state change,
+                // then refresh workspaces explicitly
                 await refreshWorkspaces();
+
+                // CRITICAL: Ensure localStorage has the workspace ID after all the refreshes.
+                // refreshWorkspaces() might have overwritten it, or it might not have found
+                // any workspaces yet (race condition with the backend).
+                // Re-set it to guarantee subsequent steps can make workspace-scoped API calls.
+                const currentWsId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE);
+                if ((!currentWsId || currentWsId === 'undefined' || currentWsId === 'null') && wsId) {
+                    localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE, String(wsId));
+                    console.log('Onboarding: Re-stored workspace ID after refresh:', wsId);
+                }
+
+                console.log('Onboarding: Setup complete. Active workspace ID in localStorage:', 
+                    localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE));
             } catch (err) {
                 const msg = err.data?.message || err.response?.data?.message || err.message || 'Failed to create organization.';
                 setError(msg);
@@ -681,45 +756,131 @@ const Onboarding = () => {
             setSubmitting(false);
         }
 
-        // Step 2 → 3: Create service (if filled)
-        if (currentStep === 2 && data.service.name.trim()) {
-            setSubmitting(true);
-            try {
-                const hours = parseInt(data.service.durationHours) || 0;
-                const minutes = parseInt(data.service.durationMinutes) || 0;
-                await servicesApi.create({
-                    name: data.service.name.trim(),
-                    duration_minutes: hours * 60 + minutes || 30,
-                    price: parseFloat(data.service.price) || 0,
-                    service_type: data.service.type,
-                    meeting_mode: data.service.meetingMode,
-                    description: data.service.description,
-                });
-            } catch (err) {
-                console.warn('Service creation during onboarding failed:', err.message || err);
-                // Non-blocking — continue to next step
-            }
-            setSubmitting(false);
-        }
-
-        // Step 3 → 4: Add staff (if filled)
-        if (currentStep === 3) {
+        // Step 2 → 3: Add staff FIRST (if filled) — must happen before service creation
+        if (currentStep === 2) {
             const validStaff = data.staffList.filter(s => s.email.trim());
             if (validStaff.length > 0) {
                 setSubmitting(true);
+
+                // Verify workspace ID is available — try to recover if missing
+                let wsId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE);
+                if (!wsId || wsId === 'undefined' || wsId === 'null') {
+                    // Try to fetch workspaces and recover the ID
+                    console.log('Onboarding: Workspace ID missing in localStorage, attempting recovery...');
+                    try {
+                        const recovered = await refreshWorkspaces();
+                        wsId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE);
+                        console.log('Onboarding: Recovery result — wsId:', wsId, 'workspaces:', recovered?.length);
+                    } catch (e) {
+                        console.error('Onboarding: Workspace recovery failed:', e);
+                    }
+                }
+
+                if (!wsId || wsId === 'undefined' || wsId === 'null') {
+                    setError('Workspace not ready. The workspace may not have been created successfully in step 1. Please go back to step 1 and try again, or refresh the page.');
+                    setSubmitting(false);
+                    return;
+                }
+
+                const failedStaff = [];
+                const successStaffIds = [];
                 for (const staff of validStaff) {
                     try {
-                        await usersApi.create({
+                        const res = await usersApi.create({
                             name: staff.name.trim() || staff.email.split('@')[0],
                             email: staff.email.trim(),
                         });
+                        // Capture the created user ID for service assignment in the next step
+                        const userId = res.data?.data?.user_id;
+                        if (userId) {
+                            successStaffIds.push(userId);
+                        }
                     } catch (err) {
-                        console.warn(`Staff invite failed for ${staff.email}:`, err.message || err);
-                        // Non-blocking — continue with others
+                        const msg = err.data?.message || err.response?.data?.message || err.message || 'Unknown error';
+                        console.error(`Staff invite failed for ${staff.email}:`, msg);
+                        failedStaff.push(`${staff.email} (${msg})`);
                     }
                 }
                 setSubmitting(false);
+
+                // Store created staff IDs so service step can auto-assign them
+                setCreatedStaffIds(successStaffIds);
+
+                if (failedStaff.length > 0 && failedStaff.length === validStaff.length) {
+                    setError(`Failed to add staff: ${failedStaff.join(', ')}. You can retry or skip and add them later from the Employees page.`);
+                    return;
+                } else if (failedStaff.length > 0) {
+                    setError(`Some staff couldn't be added: ${failedStaff.join(', ')}. You can add them later from the Employees page.`);
+                    // Continue to next step despite partial failure
+                }
             }
+        }
+
+        // Step 3 → 4: Create service (if filled) — staff already exist from Step 2
+        if (currentStep === 3 && data.service.name.trim()) {
+            setSubmitting(true);
+            try {
+                // Verify workspace ID is available — try to recover if missing
+                let wsId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE);
+                if (!wsId || wsId === 'undefined' || wsId === 'null') {
+                    console.log('Onboarding: Workspace ID missing before service creation, attempting recovery...');
+                    try {
+                        await refreshWorkspaces();
+                        wsId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE);
+                    } catch (e) { /* ignore */ }
+                }
+                if (!wsId || wsId === 'undefined' || wsId === 'null') {
+                    throw new Error('Workspace not ready. Please go back to step 1 and try again, or refresh the page.');
+                }
+
+                const hours = parseInt(data.service.durationHours) || 0;
+                const minutes = parseInt(data.service.durationMinutes) || 0;
+                const svcType = data.service.type || 'one-on-one';
+
+                // For non-resource services, attach staff IDs created in the previous step
+                const payload = {
+                    name: data.service.name.trim(),
+                    duration_minutes: hours * 60 + minutes || 30,
+                    price: parseFloat(data.service.price) || 0,
+                    service_type: svcType,
+                    meeting_mode: data.service.meetingMode,
+                    description: data.service.description,
+                };
+
+                // Auto-assign staff from onboarding step 2 (or fetch all workspace employees)
+                if (svcType !== 'resource') {
+                    let staffIdsToAssign = createdStaffIds;
+
+                    // If no staff were created in step 2, try to fetch existing employees
+                    if (staffIdsToAssign.length === 0) {
+                        try {
+                            const empRes = await usersApi.getAll();
+                            if (empRes.data?.success) {
+                                staffIdsToAssign = (empRes.data.data || []).map(e => e.id || e.user_id || e.ROWID).filter(Boolean);
+                            }
+                        } catch (fetchErr) {
+                            console.warn('Could not fetch employees for auto-assignment:', fetchErr.message);
+                        }
+                    }
+
+                    if (staffIdsToAssign.length === 0) {
+                        setError('No employees available to assign. Non-resource services require at least one employee. Please go back and add staff first, or change the service type to "Resource".');
+                        setSubmitting(false);
+                        return;
+                    }
+
+                    payload.staff_ids = staffIdsToAssign;
+                }
+
+                await servicesApi.create(payload);
+            } catch (err) {
+                const msg = err.data?.message || err.response?.data?.message || err.message || 'Failed to create service.';
+                console.error('Service creation during onboarding failed:', msg);
+                setError(`Service creation failed: ${msg}. You can retry or skip and create it later from the Services page.`);
+                setSubmitting(false);
+                return;
+            }
+            setSubmitting(false);
         }
 
         setCurrentStep(prev => Math.min(prev + 1, STEPS.length - 1));
@@ -731,16 +892,28 @@ const Onboarding = () => {
         setCurrentStep(prev => Math.max(prev - 1, 0));
     };
 
-    const handleFinish = () => {
+    const handleFinish = async () => {
         // Mark onboarding done in localStorage
         localStorage.setItem('bp_onboarding_completed', 'true');
-        // Navigate to dashboard
+
+        // Ensure workspace ID is in localStorage before navigating
+        let wsId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE);
+        if (!wsId || wsId === 'undefined' || wsId === 'null') {
+            try {
+                await refreshWorkspaces();
+                wsId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE);
+            } catch (e) { /* ignore */ }
+        }
+
+        // Navigate to dashboard using workspace slug
         const slug = workspaceSlug || data.orgName.toLowerCase().replace(/[^a-z0-9]/g, '-');
         window.location.hash = `#/ws/${slug}`;
+        // Full reload ensures all contexts (Auth, Workspace, Permission) re-initialize
+        // with the latest data from the backend
         window.location.reload();
     };
 
-    const canSkip = currentStep === 2 || currentStep === 3;
+    const canSkip = currentStep === 2 || currentStep === 3; // Staff (2) and Service (3) are both skippable
     const isLastStep = currentStep === STEPS.length - 1;
     const stepData = STEPS[currentStep];
 
@@ -842,8 +1015,8 @@ const Onboarding = () => {
 
                         {currentStep === 0 && <StepOrganization data={data} onChange={setData} error={stepErrors[0]} />}
                         {currentStep === 1 && <StepBusinessHours data={data} onChange={setData} />}
-                        {currentStep === 2 && <StepService data={data} onChange={setData} />}
-                        {currentStep === 3 && <StepStaff data={data} onChange={setData} />}
+                        {currentStep === 2 && <StepStaff data={data} onChange={setData} />}
+                        {currentStep === 3 && <StepService data={data} onChange={setData} />}
                         {currentStep === 4 && <StepComplete data={data} />}
                     </div>
                 </div>
@@ -865,7 +1038,7 @@ const Onboarding = () => {
                     </div>
                     <div style={{ display: 'flex', gap: '12px' }}>
                         {canSkip && !submitting && (
-                            <button onClick={() => setCurrentStep(prev => prev + 1)} style={{
+                            <button onClick={() => { setError(null); setStepErrors({}); setCurrentStep(prev => prev + 1); }} style={{
                                 ...btnSecondaryStyle, color: '#6B7280',
                             }}>
                                 Skip for now
@@ -891,7 +1064,7 @@ const Onboarding = () => {
                                         animation: 'spin 0.7s linear infinite', display: 'inline-block',
                                     }} />
                                 )}
-                                {submitting ? 'Setting up...' : (
+                                {submitting ? (currentStep === 0 ? 'Creating workspace... (this may take a minute on first launch)' : 'Processing...') : (
                                     <>{currentStep === 0 ? 'Create & Continue' : 'Continue'} <ChevronRight size={16} /></>
                                 )}
                             </button>

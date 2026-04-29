@@ -101,20 +101,15 @@ const setupOrganization = async (req, { organization_name, org_slug, timezone, c
     let currentStep = 'Checking existing setup';
 
     try {
-        // ── STEP 0: Schema Validation ──
-        // Validates all required tables and column types BEFORE attempting any inserts.
-        // This catches issues like "permission_key is bigint but should be varchar"
-        // and gives the user clear fix instructions instead of cryptic insert errors.
-        currentStep = 'Validating Data Store schema';
-        await validateSchemaForSetup(req);
-
-        // Check if already set up
+        // ── STEP 0: Quick check if already set up (1 DB call) ──
+        // NOTE: Removed the expensive validateSchemaForSetup() call that was doing
+        // probe inserts/deletes on EVERY table (14+ extra DB calls). Schema errors
+        // will now surface as clear error messages from the actual inserts.
         currentStep = 'Checking if organization already exists';
         let existing = [];
         try {
             existing = await executeZCQL(req, `SELECT * FROM ${TABLES.ORGANIZATION} LIMIT 1`);
         } catch (e) {
-            // Table might be empty — that's fine, means first-time setup
             console.log('Organization table query (expected empty for first setup):', e.message);
         }
 
@@ -129,9 +124,7 @@ const setupOrganization = async (req, { organization_name, org_slug, timezone, c
         const workspaceId = nowMs + 2;
         const userWorkspaceId = nowMs + 3;
 
-        // 1. Create Organization
-        // owner_user_id is BIGINT — must be a number, NOT 'pending' or 'temp-xxx'
-        // We use a placeholder numeric ID now and update it after user creation
+        // ── STEP 1: Create Organization (1 DB call) ──
         currentStep = 'Creating organization record';
         const slug = org_slug || organization_name.toLowerCase().replace(/[^a-z0-9]/g, '-');
         const orgRow = await safeInsertRow(datastore, TABLES.ORGANIZATION, {
@@ -141,77 +134,73 @@ const setupOrganization = async (req, { organization_name, org_slug, timezone, c
             timezone: timezone || DEFAULTS.TIMEZONE,
             currency: currency || DEFAULTS.CURRENCY,
             subscription_plan: DEFAULTS.SUBSCRIPTION_PLAN,
-            owner_user_id: userId, // Placeholder numeric — will update after user insert
+            owner_user_id: userId,
             brand_color: DEFAULTS.BRAND_COLOR,
             status: 'active',
             setup_completed: 'false',
             created_at: catalystDateTime(),
         }, ['brand_color', 'subscription_plan', 'logo_url']);
 
-        const orgROWID = orgRow.ROWID; // This is a number from Catalyst
+        const orgROWID = orgRow.ROWID;
 
-        // 2. Seed Permissions
-        currentStep = 'Seeding permission definitions';
-        await seedPermissions(req);
+        // ── STEP 2: Seed Permissions + Create User IN PARALLEL ──
+        // These are independent operations — run them concurrently to save time.
+        currentStep = 'Seeding permissions & creating admin user';
 
-        // 3. Create / link the setup user in the Users table
-        currentStep = 'Creating admin user record';
         let userROWID;
-        if (req.user._needsDbInsert) {
-            const catalystName = req.user.display_name || req.user.email.split('@')[0];
-            const newUserRow = await safeInsertRow(datastore, TABLES.USERS, {
-                user_id: userId,
-                catalyst_user_id: String(req.user.catalyst_user_id),
-                catalyst_role_id: String(req.user.catalyst_role_id || ''),
-                display_name: catalystName,
-                email: req.user.email,
-                phone: '',
-                organization_id: toBigInt(orgROWID),
-                is_super_admin: 'true',
-                role_version: 0,
-                status: 'active',
-                color: DEFAULTS.USER_COLOR,
-                initials: catalystName.substring(0, 2).toUpperCase(),
-                created_at: catalystDateTime(),
-            }, ['phone', 'color', 'initials', 'catalyst_role_id', 'avatar_url', 'designation', 'gender', 'dob']);
+        const userInsertPromise = (async () => {
+            if (req.user._needsDbInsert) {
+                const catalystName = req.user.display_name || req.user.email.split('@')[0];
+                const newUserRow = await safeInsertRow(datastore, TABLES.USERS, {
+                    user_id: userId,
+                    catalyst_user_id: String(req.user.catalyst_user_id),
+                    catalyst_role_id: String(req.user.catalyst_role_id || ''),
+                    display_name: catalystName,
+                    email: req.user.email,
+                    phone: '',
+                    organization_id: toBigInt(orgROWID),
+                    is_super_admin: 'true',
+                    role_version: 0,
+                    status: 'active',
+                    color: DEFAULTS.USER_COLOR,
+                    initials: catalystName.substring(0, 2).toUpperCase(),
+                    created_at: catalystDateTime(),
+                }, ['phone', 'color', 'initials', 'catalyst_role_id', 'avatar_url', 'designation', 'gender', 'dob']);
 
-            userROWID = newUserRow.ROWID;
-            req.user.user_id = toBigInt(newUserRow.user_id || newUserRow.ROWID);
-            req.user.ROWID = newUserRow.ROWID;
-            req.user._isTemporary = false;
-            req.user._needsDbInsert = false;
-            console.log('Setup: Created user row ROWID:', newUserRow.ROWID, 'org ROWID:', orgROWID);
-        } else if (req.user.ROWID) {
-            userROWID = req.user.ROWID;
-            try {
+                userROWID = newUserRow.ROWID;
+                req.user.user_id = toBigInt(newUserRow.user_id || newUserRow.ROWID);
+                req.user.ROWID = newUserRow.ROWID;
+                req.user._isTemporary = false;
+                req.user._needsDbInsert = false;
+                console.log('Setup: Created user ROWID:', newUserRow.ROWID, 'org ROWID:', orgROWID);
+            } else if (req.user.ROWID) {
+                userROWID = req.user.ROWID;
                 await datastore.table(TABLES.USERS).updateRow({
                     ROWID: req.user.ROWID,
                     is_super_admin: 'true',
                     organization_id: toBigInt(orgROWID),
-                });
-                console.log('Setup: Updated existing user row with organization_id:', orgROWID);
-            } catch (updateErr) {
-                console.error('Failed to update user with organization_id:', updateErr.message);
+                }).catch(e => console.error('Failed to update user org:', e.message));
             }
-        }
+        })();
 
-        // Update the org's owner_user_id to the real user ROWID
-        currentStep = 'Linking organization owner';
-        try {
-            const realOwnerUserId = toBigInt(userROWID || req.user.ROWID || req.user.user_id);
-            await datastore.table(TABLES.ORGANIZATION).updateRow({
-                ROWID: orgRow.ROWID,
-                owner_user_id: realOwnerUserId,
-            });
-        } catch (ownerUpdateErr) {
-            console.warn('Failed to update org owner_user_id (non-critical):', ownerUpdateErr.message);
-        }
+        // Run permission seeding + user creation concurrently
+        await Promise.all([
+            seedPermissions(req),
+            userInsertPromise,
+        ]);
 
-        // 4. Create first Workspace
-        currentStep = 'Creating first workspace';
+        // ── STEP 3: Create workspace (WHILE updating org owner in background) ──
+        currentStep = 'Creating workspace';
         const wsName = workspace_name || organization_name;
         const wsSlug = workspace_slug || wsName.toLowerCase().replace(/[^a-z0-9]/g, '-');
         const createdBy = toBigInt(userROWID || req.user.ROWID || req.user.user_id);
+
+        // Fire-and-forget: update org owner in background (don't block)
+        const realOwnerUserId = toBigInt(userROWID || req.user.ROWID || req.user.user_id);
+        datastore.table(TABLES.ORGANIZATION).updateRow({
+            ROWID: orgRow.ROWID,
+            owner_user_id: realOwnerUserId,
+        }).catch(e => console.warn('Non-critical: org owner update failed:', e.message));
 
         const wsRow = await safeInsertRow(datastore, TABLES.WORKSPACES, {
             workspace_id: workspaceId,
@@ -224,53 +213,51 @@ const setupOrganization = async (req, { organization_name, org_slug, timezone, c
             created_at: catalystDateTime(),
         }, ['description', 'brand_color', 'timezone', 'currency', 'logo_url']);
 
-        // 5. Seed Roles
+        // ── STEP 4: Seed Roles + UserWorkspace assignment IN PARALLEL ──
+        // seedRolesForWorkspace needs to complete first (to get Owner role ID),
+        // but we can start the org completion update concurrently.
         currentStep = 'Creating default roles and permissions';
         const roleMap = await seedRolesForWorkspace(req, wsRow.ROWID);
 
-        // 6. Assign Owner to workspace
-        currentStep = 'Assigning owner role to your account';
+        // ── STEP 5: Assign Owner to workspace + Mark complete IN PARALLEL ──
+        currentStep = 'Finalizing setup';
         const ownerRoleId = roleMap['Owner'];
         const assignUserId = toBigInt(userROWID || req.user.ROWID || req.user.user_id);
-        await safeInsertRow(datastore, TABLES.USER_WORKSPACES, {
-            user_workspace_id: userWorkspaceId,
-            user_id: assignUserId,
-            workspace_id: toBigInt(wsRow.ROWID),
-            role_id: toBigInt(ownerRoleId),
-            status: 'active',
-            joined_at: catalystDateTime(),
-        });
 
-        // 7. Mark complete
-        currentStep = 'Finalizing setup';
-        await datastore.table(TABLES.ORGANIZATION).updateRow({
-            ROWID: orgRow.ROWID,
-            setup_completed: 'true',
-        });
+        await Promise.all([
+            // Assign owner role
+            safeInsertRow(datastore, TABLES.USER_WORKSPACES, {
+                user_workspace_id: userWorkspaceId,
+                user_id: assignUserId,
+                workspace_id: toBigInt(wsRow.ROWID),
+                role_id: toBigInt(ownerRoleId),
+                status: 'active',
+                joined_at: catalystDateTime(),
+            }),
+            // Mark setup complete
+            datastore.table(TABLES.ORGANIZATION).updateRow({
+                ROWID: orgRow.ROWID,
+                setup_completed: 'true',
+            }),
+        ]);
 
-        // 8. Audit (non-blocking — don't let audit failure break setup)
-        try {
-            await insertAuditLog(req, {
-                workspaceId: wsRow.ROWID,
-                userId: req.user.user_id,
-                action: AUDIT_ACTIONS.ORG_SETUP,
-                resourceType: TABLES.ORGANIZATION,
-                resourceId: orgRow.ROWID,
-                details: { org_name: organization_name, workspace_name: wsName },
-            });
-        } catch (auditErr) {
-            console.error('Audit log insert failed (non-critical):', auditErr.message);
-        }
+        // Audit log — fire-and-forget (don't block the response)
+        insertAuditLog(req, {
+            workspaceId: wsRow.ROWID,
+            userId: req.user.user_id,
+            action: AUDIT_ACTIONS.ORG_SETUP,
+            resourceType: TABLES.ORGANIZATION,
+            resourceId: orgRow.ROWID,
+            details: { org_name: organization_name, workspace_name: wsName },
+        }).catch(e => console.error('Audit log failed (non-critical):', e.message));
 
         return { organization: orgRow, workspace: wsRow };
 
     } catch (err) {
-        // If it's already a known error type, re-throw as-is
         if (err instanceof AppError || err instanceof ConflictError || err instanceof ValidationError) {
             throw err;
         }
 
-        // Wrap the raw error with step context so the user knows WHAT failed
         const stepInfo = currentStep ? ` (while: ${currentStep})` : '';
         const rawMsg = err.message || 'Unknown error';
         console.error(`Setup failed at step "${currentStep}":`, rawMsg);

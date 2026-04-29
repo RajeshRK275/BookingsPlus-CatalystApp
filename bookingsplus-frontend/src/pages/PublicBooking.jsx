@@ -128,7 +128,8 @@ const PublicBooking = () => {
             customer_email: formData.email,
             start_time: startTime.toISOString(),
             end_time: endTime.toISOString(),
-            staff_id: 'default' // Add staff selection if required
+            // staff_id is NOT sent — backend auto-resolves the best available staff
+            // based on service type (one-on-one, group, collective, resource)
         };
 
         try {

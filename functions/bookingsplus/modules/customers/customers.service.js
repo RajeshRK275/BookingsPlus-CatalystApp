@@ -3,17 +3,26 @@
  * Customers are people who book appointments.
  * IMPORTANT: All _id columns in Catalyst Data Store are BIGINT.
  */
-const { getDatastore, executeWorkspaceScopedZCQL, insertAuditLog, catalystDateTime } = require('../../utils/datastore');
+const { getDatastore, executeZCQL, executeWorkspaceScopedZCQL, insertAuditLog, catalystDateTime } = require('../../utils/datastore');
 const { TABLES } = require('../../core/constants');
 const { NotFoundError, ValidationError, ConflictError } = require('../../core/errors');
 
-/** Coerce any value to a safe BIGINT-compatible number */
 const toBigInt = (value) => {
     if (value === null || value === undefined) return Date.now();
     if (typeof value === 'number' && !isNaN(value)) return value;
     const parsed = parseInt(String(value), 10);
     if (!isNaN(parsed) && parsed > 0) return parsed;
     return Date.now();
+};
+
+/** Resolve organization_id from req or DB */
+const getOrgId = async (req) => {
+    if (req.organizationId) return toBigInt(req.organizationId);
+    try {
+        const result = await executeZCQL(req, 'SELECT ROWID FROM Organization LIMIT 1');
+        if (result.length > 0) return toBigInt(result[0].Organization.ROWID);
+    } catch (e) { /* ignore */ }
+    return 0;
 };
 
 /**
@@ -83,9 +92,11 @@ const create = async (req, data) => {
 
     const datastore = getDatastore(req);
     const customerName = name || email.split('@')[0];
+    const orgId = await getOrgId(req);
 
     const row = await datastore.table(TABLES.CUSTOMERS).insertRow({
         customer_id: Date.now(),
+        organization_id: orgId,
         workspace_id: toBigInt(req.workspaceId),
         customer_name: customerName,
         customer_email: email || '',

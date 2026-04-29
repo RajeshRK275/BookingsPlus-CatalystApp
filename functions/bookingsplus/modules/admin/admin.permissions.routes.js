@@ -25,21 +25,40 @@ router.get('/', async (req, res, next) => {
 });
 
 // GET /role/:roleId — Get permissions assigned to a role
+// Uses SEPARATE queries instead of JOINs to avoid "No relationship between tables" error
 router.get('/role/:roleId', async (req, res, next) => {
     try {
-        const result = await executeZCQL(req,
-            `SELECT rp.ROWID as rp_id, p.permission_key, p.resource, p.action, p.description 
-             FROM RolePermissions rp 
-             JOIN Permissions p ON rp.permission_id = p.ROWID 
-             WHERE rp.role_id = '${req.params.roleId}'`
+        // Step 1: Get all role-permission mappings for this role
+        const rpResult = await executeZCQL(req,
+            `SELECT * FROM RolePermissions WHERE role_id = '${req.params.roleId}'`
         );
-        const permissions = result.map(r => ({
-            rp_id: (r.RolePermissions || r).rp_id,
-            permission_key: (r.Permissions || r).permission_key,
-            resource: (r.Permissions || r).resource,
-            action: (r.Permissions || r).action,
-            description: (r.Permissions || r).description,
-        }));
+
+        // Step 2: For each mapping, fetch permission details
+        const permissions = [];
+        for (const row of rpResult) {
+            const rp = row.RolePermissions || row;
+            const permId = rp.permission_id;
+            if (!permId) continue;
+
+            try {
+                const permResult = await executeZCQL(req,
+                    `SELECT * FROM Permissions WHERE ROWID = '${permId}'`
+                );
+                if (permResult.length > 0) {
+                    const perm = permResult[0].Permissions || permResult[0];
+                    permissions.push({
+                        rp_id: rp.ROWID,
+                        permission_key: perm.permission_key,
+                        resource: perm.resource,
+                        action: perm.action,
+                        description: perm.description,
+                    });
+                }
+            } catch (e) {
+                console.warn(`Failed to fetch permission ${permId}:`, e.message);
+            }
+        }
+
         res.json({ success: true, data: permissions });
     } catch (err) {
         next(err);
