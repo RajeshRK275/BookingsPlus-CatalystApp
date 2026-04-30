@@ -251,9 +251,15 @@ const authMiddleware = async (req, res, next) => {
         // ── Attach authenticated user + organizationId to request ──
         // NOTE: Removed the UserRoleMapping query — that table doesn't exist
         // and was causing an unnecessary DB call on every request.
+        //
+        // CRITICAL: user_id MUST be set to ROWID (not the custom user_id column).
+        // The UserWorkspaces table stores Users.ROWID in its user_id column.
+        // All workspace membership lookups, permission checks, and employee
+        // listing queries use this value to join Users ↔ UserWorkspaces.
+        // Using the custom user_id (Date.now()) would cause mismatches.
         req.organizationId = organizationId;
         req.user = {
-            user_id: localUser.user_id || localUser.ROWID,
+            user_id: localUser.ROWID,
             catalyst_user_id: catalystUserId,
             catalyst_role_id: localUser.catalyst_role_id || '',
             email: localUser.email || catalystEmail,

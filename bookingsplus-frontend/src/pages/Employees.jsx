@@ -42,13 +42,17 @@ const Employees = () => {
     const [employees, setEmployees] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [fetchError, setFetchError] = useState(null);
 
     const fetchEmployees = async () => {
         try {
             setLoading(true);
+            setFetchError(null);
+            console.log('[Employees] Fetching employees... Active workspace:', activeWorkspace?.workspace_id, '| localStorage wsId:', localStorage.getItem('bp_active_workspace'));
             const response = await usersApi.getAll();
+            console.log('[Employees] API response:', JSON.stringify(response.data));
             if (response.data && response.data.success) {
-                setEmployees((response.data.data || []).map(e => {
+                const mapped = (response.data.data || []).map(e => {
                     const name = e.name || e.display_name || 'Unknown';
                     return {
                         ...e,
@@ -63,10 +67,24 @@ const Employees = () => {
                         status: e.status || 'active',
                         is_super_admin: e.is_super_admin === 'true' || e.is_super_admin === true,
                     };
-                }));
+                });
+                console.log('[Employees] Mapped employees:', mapped.length, mapped.map(e => ({ id: e.id, email: e.email, name: e.name })));
+                setEmployees(mapped);
+            } else {
+                setFetchError(response.data?.message || 'Failed to load employees. Please try again.');
             }
         } catch (err) {
             console.error('Error fetching employees:', err.message || err);
+            const status = err.status || err.response?.status;
+            const apiMessage = err.data?.message || err.response?.data?.message || err.message || '';
+
+            if (status === 400 && apiMessage.includes('Workspace')) {
+                setFetchError('Workspace not selected. Please refresh the page or select a workspace from the sidebar.');
+            } else if (status === 403) {
+                setFetchError('You do not have permission to view employees. Contact your administrator.');
+            } else {
+                setFetchError(`Failed to load employees: ${apiMessage || 'Unknown error'}. Please try refreshing the page.`);
+            }
         } finally {
             setLoading(false);
         }
@@ -125,9 +143,39 @@ const Employees = () => {
                 </div>
             </div>
 
+            {/* Error Banner */}
+            {fetchError && !loading && (
+                <div style={{
+                    backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '10px',
+                    padding: '16px 20px', marginBottom: '20px', display: 'flex', alignItems: 'flex-start', gap: '12px',
+                }}>
+                    <div style={{
+                        width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#FEE2E2',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px',
+                    }}>
+                        <span style={{ color: '#DC2626', fontSize: '14px', fontWeight: 700 }}>!</span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: '14px', color: '#991B1B', margin: 0, lineHeight: '1.5', fontWeight: 500 }}>
+                            {fetchError}
+                        </p>
+                        <button
+                            onClick={fetchEmployees}
+                            style={{
+                                marginTop: '10px', padding: '6px 16px', fontSize: '13px', fontWeight: 500,
+                                backgroundColor: 'white', border: '1px solid #FECACA', borderRadius: '6px',
+                                color: '#DC2626', cursor: 'pointer', fontFamily: 'inherit',
+                            }}
+                        >
+                            Retry
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {loading ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: '#6B7280' }}>Loading Employees...</div>
-            ) : filteredEmployees.length === 0 ? (
+            ) : filteredEmployees.length === 0 && !fetchError ? (
                 /* Empty State */
                 <div style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',

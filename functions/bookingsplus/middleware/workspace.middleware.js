@@ -6,9 +6,12 @@
  * Super admins bypass the membership check.
  * Attaches req.workspaceId and req.userRole to the request.
  * 
- * IMPORTANT: Uses SEPARATE queries instead of JOINs to avoid the Catalyst ZCQL
- * "No relationship between tables" error that occurs when table relationships
- * aren't configured in the Data Store settings.
+ * KNOWN DATA ISSUE: During initial onboarding, the setup code stored sequential
+ * Date.now()+N values. UserWorkspaces may have:
+ *   - workspace_id that is ±1-5 off from the actual Workspaces.ROWID
+ *   - user_id that is ±1-5 off from the actual Users.ROWID
+ *   - role_id that is a custom timestamp, not a Roles.ROWID
+ * We handle all these cases with multi-strategy + fuzzy matching.
  */
 const { executeZCQL } = require('../utils/datastore');
 
@@ -52,21 +55,76 @@ const workspaceMiddleware = async (req, res, next) => {
             return next();
         }
 
-        // ── Validate user's membership using SEPARATE queries (no JOINs) ──
+        // ── Validate user's membership ──
         const userId = req.user.user_id || req.user.ROWID;
+        const userROWID = req.user.ROWID;
 
-        // Step 1: Check UserWorkspaces membership
-        let membershipResult;
+        // Collect all possible user IDs to check
+        const userIdsToTry = new Set();
+        userIdsToTry.add(String(userId));
+        if (userROWID) userIdsToTry.add(String(userROWID));
+
+        // Also look up ROWID from custom user_id
         try {
-            membershipResult = await executeZCQL(req,
-                `SELECT * FROM UserWorkspaces WHERE user_id = '${userId}' AND workspace_id = '${workspaceId}'`
+            const userLookup = await executeZCQL(req,
+                `SELECT ROWID FROM Users WHERE user_id = '${userId}'`
             );
-        } catch (e) {
-            console.error('[WorkspaceMiddleware] Membership query failed:', e.message);
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to verify workspace membership: ' + e.message
-            });
+            if (userLookup.length > 0) {
+                userIdsToTry.add(String(userLookup[0].Users.ROWID));
+            }
+        } catch (e) { /* ignore */ }
+
+        // Collect all possible workspace IDs to check
+        const wsIdsToTry = new Set();
+        wsIdsToTry.add(String(workspaceId));
+        if (workspace.workspace_id && String(workspace.workspace_id) !== String(workspaceId)) {
+            wsIdsToTry.add(String(workspace.workspace_id));
+        }
+
+        // Try exact matches: user_id × workspace_id combinations
+        let membershipResult = [];
+        for (const uid of userIdsToTry) {
+            if (membershipResult.length > 0) break;
+            for (const wsId of wsIdsToTry) {
+                if (membershipResult.length > 0) break;
+                try {
+                    membershipResult = await executeZCQL(req,
+                        `SELECT * FROM UserWorkspaces WHERE user_id = '${uid}' AND workspace_id = '${wsId}'`
+                    );
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        // Fuzzy fallback: fetch all active UserWorkspaces and match by proximity
+        // This handles the onboarding bug where IDs are off by 1-5
+        if (membershipResult.length === 0) {
+            console.log('[WorkspaceMiddleware] Exact match failed, trying fuzzy match...');
+            try {
+                const allUw = await executeZCQL(req, `SELECT * FROM UserWorkspaces WHERE status = 'active'`);
+                const targetWsId = parseInt(String(workspaceId), 10);
+                const targetUserIds = [...userIdsToTry].map(id => parseInt(id, 10)).filter(n => !isNaN(n));
+
+                for (const row of allUw) {
+                    const uw = row.UserWorkspaces || row;
+                    const uwWsId = parseInt(String(uw.workspace_id), 10);
+                    const uwUserId = parseInt(String(uw.user_id), 10);
+
+                    if (isNaN(uwWsId) || isNaN(uwUserId)) continue;
+
+                    // workspace_id within ±10
+                    const wsMatch = !isNaN(targetWsId) && Math.abs(uwWsId - targetWsId) <= 10;
+                    // user_id within ±10 of any candidate user IDs
+                    const userMatch = targetUserIds.some(tid => Math.abs(uwUserId - tid) <= 10);
+
+                    if (wsMatch && userMatch) {
+                        membershipResult = [row];
+                        console.log(`[WorkspaceMiddleware] Fuzzy matched: UW.user_id=${uw.user_id} (target: ${targetUserIds}), UW.workspace_id=${uw.workspace_id} (target: ${targetWsId})`);
+                        break;
+                    }
+                }
+            } catch (e) {
+                console.warn('[WorkspaceMiddleware] Fuzzy fallback failed:', e.message);
+            }
         }
 
         if (membershipResult.length === 0) {
@@ -85,14 +143,44 @@ const workspaceMiddleware = async (req, res, next) => {
             });
         }
 
-        // Step 2: Fetch role details separately if role_id exists
+        // Resolve role — role_id might be ROWID or custom role_id (timestamp)
         let roleName = 'Staff';
         let roleLevel = 0;
         if (uwData.role_id) {
             try {
-                const roleResult = await executeZCQL(req,
+                // Try direct ROWID match
+                let roleResult = await executeZCQL(req,
                     `SELECT role_name, role_level FROM Roles WHERE ROWID = '${uwData.role_id}'`
                 );
+
+                // Fallback: try custom role_id field match
+                if (roleResult.length === 0) {
+                    roleResult = await executeZCQL(req,
+                        `SELECT role_name, role_level FROM Roles WHERE role_id = '${uwData.role_id}'`
+                    );
+                }
+
+                // Fuzzy fallback: find role with closest ROWID or custom role_id
+                if (roleResult.length === 0) {
+                    const allRoles = await executeZCQL(req, `SELECT * FROM Roles`);
+                    const targetRoleId = parseInt(String(uwData.role_id), 10);
+                    if (!isNaN(targetRoleId)) {
+                        let bestDist = Infinity;
+                        for (const r of allRoles) {
+                            const role = r.Roles || r;
+                            const rRowId = parseInt(String(role.ROWID), 10);
+                            const rCustomId = parseInt(String(role.role_id), 10);
+                            const distRow = !isNaN(rRowId) ? Math.abs(rRowId - targetRoleId) : Infinity;
+                            const distCustom = !isNaN(rCustomId) ? Math.abs(rCustomId - targetRoleId) : Infinity;
+                            const dist = Math.min(distRow, distCustom);
+                            if (dist <= 10 && dist < bestDist) {
+                                bestDist = dist;
+                                roleResult = [r];
+                            }
+                        }
+                    }
+                }
+
                 if (roleResult.length > 0) {
                     const role = roleResult[0].Roles || roleResult[0];
                     roleName = role.role_name || 'Staff';

@@ -64,6 +64,15 @@ function createMockCatalystApp() {
                     DB[tableName].push(row);
                     return row;
                 },
+                insertRows: async (rows) => {
+                    if (!DB[tableName]) DB[tableName] = [];
+                    const inserted = rows.map(data => {
+                        const row = { ...data, ROWID: nextRowId() };
+                        DB[tableName].push(row);
+                        return row;
+                    });
+                    return inserted;
+                },
                 updateRow: async (data) => {
                     if (!DB[tableName]) return data;
                     const idx = DB[tableName].findIndex(r => String(r.ROWID) === String(data.ROWID));
@@ -135,10 +144,14 @@ function handleSelect(query) {
     
     if (!DB[mainTable]) return [];
     
-    // Handle COUNT
+    // Handle COUNT — return both 'cnt' and the Catalyst-format keys
+    // Catalyst ZCQL returns COUNT(ROWID) as { ROWID: "3" } in some formats
     if (upperQuery.includes('COUNT(')) {
         const whereFiltered = applyWhereClause(DB[mainTable], query, mainTable);
-        return [{ [mainTable]: { cnt: whereFiltered.length } }];
+        const count = whereFiltered.length;
+        const countColMatch = upperQuery.match(/COUNT\((\w+)\)/i);
+        const countCol = countColMatch ? countColMatch[1] : 'ROWID';
+        return [{ [mainTable]: { cnt: count, [countCol]: String(count), [`${countCol}.count`]: String(count) } }];
     }
     
     // Check for JOINs

@@ -47,4 +47,86 @@ router.get('/me/permissions', authMiddleware, asyncHandler(async (req, res) => {
     return response.success(res, result);
 }));
 
+/**
+ * GET /debug/data — Diagnostic endpoint to inspect datastore state.
+ * Shows all Users, UserWorkspaces, Workspaces, and Roles data.
+ * Helps debug employee visibility issues by revealing ID mismatches.
+ * REMOVE THIS IN PRODUCTION — it exposes all data.
+ */
+router.get('/debug/data', authMiddleware, asyncHandler(async (req, res) => {
+    if (!req.user.is_super_admin) {
+        return res.status(403).json({ success: false, message: 'Super admin only.' });
+    }
+
+    const { executeZCQL } = require('../../utils/datastore');
+
+    const safeQuery = async (query) => {
+        try {
+            return await executeZCQL(req, query);
+        } catch (e) {
+            return [{ error: e.message }];
+        }
+    };
+
+    const [users, userWorkspaces, workspaces, roles] = await Promise.all([
+        safeQuery('SELECT * FROM Users'),
+        safeQuery('SELECT * FROM UserWorkspaces'),
+        safeQuery('SELECT * FROM Workspaces'),
+        safeQuery('SELECT * FROM Roles'),
+    ]);
+
+    // Show raw data + the current auth state
+    return response.success(res, {
+        _authState: {
+            'req.user.user_id': req.user.user_id,
+            'req.user.ROWID': req.user.ROWID,
+            'req.user.email': req.user.email,
+            'req.user.is_super_admin': req.user.is_super_admin,
+            'X-Workspace-Id_header': req.headers['x-workspace-id'] || '(not set)',
+        },
+        users: users.map(r => {
+            const u = r.Users || r;
+            return {
+                ROWID: u.ROWID,
+                user_id: u.user_id,
+                email: u.email,
+                display_name: u.display_name,
+                catalyst_user_id: u.catalyst_user_id,
+                is_super_admin: u.is_super_admin,
+                status: u.status,
+            };
+        }),
+        userWorkspaces: userWorkspaces.map(r => {
+            const uw = r.UserWorkspaces || r;
+            return {
+                ROWID: uw.ROWID,
+                user_workspace_id: uw.user_workspace_id,
+                user_id: uw.user_id,
+                workspace_id: uw.workspace_id,
+                role_id: uw.role_id,
+                status: uw.status,
+            };
+        }),
+        workspaces: workspaces.map(r => {
+            const ws = r.Workspaces || r;
+            return {
+                ROWID: ws.ROWID,
+                workspace_id: ws.workspace_id,
+                workspace_name: ws.workspace_name,
+                workspace_slug: ws.workspace_slug,
+                status: ws.status,
+            };
+        }),
+        roles: roles.map(r => {
+            const role = r.Roles || r;
+            return {
+                ROWID: role.ROWID,
+                role_name: role.role_name,
+                role_level: role.role_level,
+                workspace_id: role.workspace_id,
+            };
+        }),
+    });
+}));
+
 module.exports = router;

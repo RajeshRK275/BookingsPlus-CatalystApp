@@ -262,12 +262,44 @@ const StepBusinessHours = ({ data, onChange }) => {
     );
 };
 
-/* ═════════ STEP 3: FIRST SERVICE ═════════ */
+/* ═════════ STEP 3: FIRST SERVICE (with employee assignment) ═════════ */
 
-const StepService = ({ data, onChange }) => {
+const StepService = ({ data, onChange, availableStaff = [] }) => {
+    const [staffSearch, setStaffSearch] = useState('');
+
     const updateService = (field, value) => {
         onChange({ ...data, service: { ...data.service, [field]: value } });
     };
+
+    const isResourceType = data.service.type === 'resource';
+
+    const filteredStaff = availableStaff.filter(s =>
+        (s.name || '').toLowerCase().includes(staffSearch.toLowerCase()) ||
+        (s.email || '').toLowerCase().includes(staffSearch.toLowerCase())
+    );
+
+    const toggleStaff = (staffId) => {
+        const current = data.service.assignedStaffIds || [];
+        const updated = current.includes(staffId)
+            ? current.filter(id => id !== staffId)
+            : [...current, staffId];
+        updateService('assignedStaffIds', updated);
+    };
+
+    const toggleSelectAll = () => {
+        const filteredIds = filteredStaff.map(s => s.id);
+        const current = data.service.assignedStaffIds || [];
+        const allSelected = filteredIds.every(id => current.includes(id));
+        if (allSelected) {
+            updateService('assignedStaffIds', current.filter(id => !filteredIds.includes(id)));
+        } else {
+            updateService('assignedStaffIds', [...new Set([...current, ...filteredIds])]);
+        }
+    };
+
+    const selectedStaffIds = data.service.assignedStaffIds || [];
+    const allFilteredSelected = filteredStaff.length > 0 && filteredStaff.every(s => selectedStaffIds.includes(s.id));
+    const getInitials = (name) => name ? name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : '??';
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -365,6 +397,166 @@ const StepService = ({ data, onChange }) => {
                     style={{ ...inputStyle, resize: 'vertical', minHeight: '80px' }}
                 />
             </div>
+
+            {/* ─── Employee Assignment Section ─── */}
+            {!isResourceType && (
+                <div style={{
+                    backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px',
+                    overflow: 'hidden', marginTop: '4px',
+                }}>
+                    {/* Section Header */}
+                    <div style={{
+                        padding: '14px 20px', borderBottom: '1px solid #E5E7EB',
+                        backgroundColor: '#F8FAFC', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Users size={16} color="#5C44B5" />
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                Assign Employees <span style={{ color: '#EF4444' }}>*</span>
+                            </span>
+                        </div>
+                        {filteredStaff.length > 0 && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#374151', userSelect: 'none' }}>
+                                Select All
+                                <input
+                                    type="checkbox"
+                                    checked={allFilteredSelected}
+                                    onChange={toggleSelectAll}
+                                    style={{ width: '16px', height: '16px', accentColor: '#5C44B5', cursor: 'pointer' }}
+                                />
+                            </label>
+                        )}
+                    </div>
+
+                    {/* Search */}
+                    {availableStaff.length > 3 && (
+                        <div style={{ padding: '12px 20px', borderBottom: '1px solid #F3F4F6' }}>
+                            <input
+                                type="text"
+                                placeholder="Search employees..."
+                                value={staffSearch}
+                                onChange={e => setStaffSearch(e.target.value)}
+                                style={{ ...inputStyle, backgroundColor: '#FAFAFA', fontSize: '13px', padding: '8px 12px' }}
+                            />
+                        </div>
+                    )}
+
+                    {/* Staff List */}
+                    <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                        {availableStaff.length === 0 ? (
+                            <div style={{
+                                padding: '28px 20px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px',
+                            }}>
+                                <Users size={28} color="#D1D5DB" style={{ marginBottom: '8px' }} />
+                                <p style={{ margin: 0 }}>No employees available. Go back and add staff first, or choose "Resource" as the service type.</p>
+                            </div>
+                        ) : filteredStaff.length === 0 ? (
+                            <div style={{ padding: '20px', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>
+                                No employees match your search.
+                            </div>
+                        ) : (
+                            filteredStaff.map((staff, idx) => {
+                                const isSelected = selectedStaffIds.includes(staff.id);
+                                return (
+                                    <div
+                                        key={staff.id}
+                                        onClick={() => toggleStaff(staff.id)}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                            padding: '10px 20px', cursor: 'pointer',
+                                            borderBottom: idx < filteredStaff.length - 1 ? '1px solid #F3F4F6' : 'none',
+                                            backgroundColor: isSelected ? '#FAFAFF' : 'white',
+                                            transition: 'background-color 0.15s',
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.backgroundColor = isSelected ? '#F3F0FF' : '#F9FAFB'}
+                                        onMouseLeave={e => e.currentTarget.style.backgroundColor = isSelected ? '#FAFAFF' : 'white'}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            <div style={{
+                                                width: '32px', height: '32px', borderRadius: '50%',
+                                                backgroundColor: isSelected ? '#E0E7FF' : '#F3F4F6',
+                                                color: isSelected ? '#5C44B5' : '#9CA3AF',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: '12px', fontWeight: 600, transition: 'all 0.15s',
+                                            }}>
+                                                {getInitials(staff.name)}
+                                            </div>
+                                            <div>
+                                                <div style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>{staff.name}</div>
+                                                {staff.email && (
+                                                    <div style={{ fontSize: '12px', color: '#9CA3AF' }}>{staff.email}</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            readOnly
+                                            style={{ width: '16px', height: '16px', accentColor: '#5C44B5', cursor: 'pointer', pointerEvents: 'none' }}
+                                        />
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+
+                    {/* Selected Count Footer */}
+                    <div style={{
+                        padding: '10px 20px', borderTop: '1px solid #E5E7EB',
+                        backgroundColor: '#FAFAFA', fontSize: '13px', color: '#6B7280',
+                        display: 'flex', alignItems: 'center', gap: '8px',
+                    }}>
+                        <span style={{ fontWeight: 500 }}>
+                            {selectedStaffIds.length === 0
+                                ? 'No employees assigned'
+                                : `${selectedStaffIds.length} employee${selectedStaffIds.length > 1 ? 's' : ''} assigned`}
+                        </span>
+                        {selectedStaffIds.length > 0 && (
+                            <div style={{ display: 'flex', gap: '2px', marginLeft: '4px' }}>
+                                {availableStaff.filter(s => selectedStaffIds.includes(s.id)).slice(0, 4).map(s => (
+                                    <div key={s.id} style={{
+                                        width: '24px', height: '24px', borderRadius: '50%',
+                                        backgroundColor: '#E0E7FF', color: '#5C44B5',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '9px', fontWeight: 600, border: '2px solid white',
+                                    }}>{getInitials(s.name)}</div>
+                                ))}
+                                {selectedStaffIds.length > 4 && (
+                                    <div style={{
+                                        width: '24px', height: '24px', borderRadius: '50%',
+                                        backgroundColor: '#F3F4F6', color: '#9CA3AF',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '9px', fontWeight: 600, border: '2px solid white',
+                                    }}>+{selectedStaffIds.length - 4}</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Validation warning for non-resource types with no employees assigned */}
+            {!isResourceType && availableStaff.length > 0 && selectedStaffIds.length === 0 && data.service.name.trim() && (
+                <div style={{
+                    backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '10px',
+                    padding: '12px 16px', fontSize: '13px', color: '#92400E',
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                }}>
+                    <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                    <span>At least one employee must be assigned to create this service. Select from the list above.</span>
+                </div>
+            )}
+
+            {!isResourceType && availableStaff.length === 0 && data.service.name.trim() && (
+                <div style={{
+                    backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '10px',
+                    padding: '12px 16px', fontSize: '13px', color: '#991B1B',
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                }}>
+                    <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                    <span>No employees exist in this workspace yet. Go back to the Staff step to add team members first, or change the service type to "Resource".</span>
+                </div>
+            )}
         </div>
     );
 };
@@ -523,7 +715,7 @@ const StepComplete = ({ data }) => {
                     <SummaryRow icon={<Users size={18} color="#9CA3AF" />} label="Staff Members" value="Skipped — add later" muted />
                 )}
                 {serviceCreated ? (
-                    <SummaryRow icon={<Briefcase size={18} color="#16A34A" />} label="First Service" value={`${data.service.name} (with staff assigned)`} />
+                    <SummaryRow icon={<Briefcase size={18} color="#16A34A" />} label="First Service" value={`${data.service.name} (${(data.service.assignedStaffIds || []).length} staff assigned)`} />
                 ) : (
                     <SummaryRow icon={<Briefcase size={18} color="#9CA3AF" />} label="First Service" value="Skipped — add later" muted />
                 )}
@@ -578,6 +770,7 @@ const Onboarding = () => {
             price: '0',
             meetingMode: 'Online',
             description: '',
+            assignedStaffIds: [],
         },
         staffList: [],
     });
@@ -607,15 +800,42 @@ const Onboarding = () => {
         }
     }, [setupCompleted]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Scroll to top on step change
+    // Scroll to top on step change + fetch employees when entering service step
     useEffect(() => {
         if (contentRef.current) {
             contentRef.current.scrollTop = 0;
         }
-    }, [currentStep]);
 
-    // Track staff created during onboarding so we can assign them to services
-    const [createdStaffIds, setCreatedStaffIds] = useState([]);
+        // When entering the service step (step 3) and we haven't loaded employees yet,
+        // fetch them. This covers the case where the user skipped the staff step.
+        if (currentStep === 3 && availableStaff.length === 0) {
+            const fetchEmployees = async () => {
+                try {
+                    const empRes = await usersApi.getAll();
+                    if (empRes.data?.success) {
+                        const employees = (empRes.data.data || []).map(e => ({
+                            id: e.id || e.user_id || e.ROWID,
+                            name: e.name || e.display_name || 'Unknown',
+                            email: e.email || '',
+                        }));
+                        setAvailableStaff(employees);
+                        // Auto-select all employees by default
+                        const allIds = employees.map(e => e.id);
+                        setData(prev => ({
+                            ...prev,
+                            service: { ...prev.service, assignedStaffIds: prev.service.assignedStaffIds.length > 0 ? prev.service.assignedStaffIds : allIds },
+                        }));
+                    }
+                } catch (err) {
+                    console.warn('Could not fetch employees for service step:', err.message);
+                }
+            };
+            fetchEmployees();
+        }
+    }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Available staff for service assignment (fetched after staff step or from API)
+    const [availableStaff, setAvailableStaff] = useState([]);
 
     const validateStep = (step) => {
         switch (step) {
@@ -783,18 +1003,12 @@ const Onboarding = () => {
                 }
 
                 const failedStaff = [];
-                const successStaffIds = [];
                 for (const staff of validStaff) {
                     try {
-                        const res = await usersApi.create({
+                        await usersApi.create({
                             name: staff.name.trim() || staff.email.split('@')[0],
                             email: staff.email.trim(),
                         });
-                        // Capture the created user ID for service assignment in the next step
-                        const userId = res.data?.data?.user_id;
-                        if (userId) {
-                            successStaffIds.push(userId);
-                        }
                     } catch (err) {
                         const msg = err.data?.message || err.response?.data?.message || err.message || 'Unknown error';
                         console.error(`Staff invite failed for ${staff.email}:`, msg);
@@ -802,9 +1016,6 @@ const Onboarding = () => {
                     }
                 }
                 setSubmitting(false);
-
-                // Store created staff IDs so service step can auto-assign them
-                setCreatedStaffIds(successStaffIds);
 
                 if (failedStaff.length > 0 && failedStaff.length === validStaff.length) {
                     setError(`Failed to add staff: ${failedStaff.join(', ')}. You can retry or skip and add them later from the Employees page.`);
@@ -814,10 +1025,42 @@ const Onboarding = () => {
                     // Continue to next step despite partial failure
                 }
             }
+
+            // After staff step completes (or was skipped), fetch all available employees
+            // so the service step can display them for assignment
+            try {
+                const empRes = await usersApi.getAll();
+                if (empRes.data?.success) {
+                    const employees = (empRes.data.data || []).map(e => ({
+                        id: e.id || e.user_id || e.ROWID,
+                        name: e.name || e.display_name || 'Unknown',
+                        email: e.email || '',
+                    }));
+                    setAvailableStaff(employees);
+                    // Auto-select all available employees by default (user can deselect)
+                    const allIds = employees.map(e => e.id);
+                    setData(prev => ({
+                        ...prev,
+                        service: { ...prev.service, assignedStaffIds: allIds },
+                    }));
+                }
+            } catch (fetchErr) {
+                console.warn('Could not fetch employees for service assignment:', fetchErr.message);
+            }
         }
 
-        // Step 3 → 4: Create service (if filled) — staff already exist from Step 2
+        // Step 3 → 4: Create service (if filled) — use user-selected staff from the UI
         if (currentStep === 3 && data.service.name.trim()) {
+            const svcType = data.service.type || 'one-on-one';
+            const isResource = svcType === 'resource';
+            const selectedStaffIds = data.service.assignedStaffIds || [];
+
+            // Validate: non-resource services must have at least one employee assigned
+            if (!isResource && selectedStaffIds.length === 0) {
+                setError('At least one employee must be assigned to this service. Select employees from the list above, or change the service type to "Resource".');
+                return;
+            }
+
             setSubmitting(true);
             try {
                 // Verify workspace ID is available — try to recover if missing
@@ -835,9 +1078,7 @@ const Onboarding = () => {
 
                 const hours = parseInt(data.service.durationHours) || 0;
                 const minutes = parseInt(data.service.durationMinutes) || 0;
-                const svcType = data.service.type || 'one-on-one';
 
-                // For non-resource services, attach staff IDs created in the previous step
                 const payload = {
                     name: data.service.name.trim(),
                     duration_minutes: hours * 60 + minutes || 30,
@@ -847,29 +1088,9 @@ const Onboarding = () => {
                     description: data.service.description,
                 };
 
-                // Auto-assign staff from onboarding step 2 (or fetch all workspace employees)
-                if (svcType !== 'resource') {
-                    let staffIdsToAssign = createdStaffIds;
-
-                    // If no staff were created in step 2, try to fetch existing employees
-                    if (staffIdsToAssign.length === 0) {
-                        try {
-                            const empRes = await usersApi.getAll();
-                            if (empRes.data?.success) {
-                                staffIdsToAssign = (empRes.data.data || []).map(e => e.id || e.user_id || e.ROWID).filter(Boolean);
-                            }
-                        } catch (fetchErr) {
-                            console.warn('Could not fetch employees for auto-assignment:', fetchErr.message);
-                        }
-                    }
-
-                    if (staffIdsToAssign.length === 0) {
-                        setError('No employees available to assign. Non-resource services require at least one employee. Please go back and add staff first, or change the service type to "Resource".');
-                        setSubmitting(false);
-                        return;
-                    }
-
-                    payload.staff_ids = staffIdsToAssign;
+                // Attach user-selected staff IDs for non-resource services
+                if (!isResource) {
+                    payload.staff_ids = selectedStaffIds;
                 }
 
                 await servicesApi.create(payload);
@@ -1016,7 +1237,7 @@ const Onboarding = () => {
                         {currentStep === 0 && <StepOrganization data={data} onChange={setData} error={stepErrors[0]} />}
                         {currentStep === 1 && <StepBusinessHours data={data} onChange={setData} />}
                         {currentStep === 2 && <StepStaff data={data} onChange={setData} />}
-                        {currentStep === 3 && <StepService data={data} onChange={setData} />}
+                        {currentStep === 3 && <StepService data={data} onChange={setData} availableStaff={availableStaff} />}
                         {currentStep === 4 && <StepComplete data={data} />}
                     </div>
                 </div>

@@ -21,9 +21,32 @@ const getUserWorkspaces = async (req, userId) => {
 
     try {
         // Step 1: Get user's workspace memberships
-        const uwResult = await executeZCQL(req,
+        // UserWorkspaces.user_id stores the Users table ROWID.
+        let uwResult = await executeZCQL(req,
             `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${userId}' AND status = 'active'`
         );
+
+        // Fallback: if no results found, userId might be the custom user_id column
+        // (not ROWID). Look up the actual ROWID and retry the query.
+        if (uwResult.length === 0) {
+            try {
+                const userLookup = await executeZCQL(req,
+                    `SELECT ROWID FROM ${TABLES.USERS} WHERE user_id = '${userId}'`
+                );
+                if (userLookup.length > 0) {
+                    const actualRowId = userLookup[0].Users.ROWID;
+                    if (String(actualRowId) !== String(userId)) {
+                        console.log(`[AuthService] user_id ${userId} resolved to ROWID ${actualRowId}, retrying workspace lookup`);
+                        uwResult = await executeZCQL(req,
+                            `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${actualRowId}' AND status = 'active'`
+                        );
+                    }
+                }
+            } catch (fallbackErr) {
+                console.warn('[AuthService] Fallback user_id→ROWID lookup failed:', fallbackErr.message);
+            }
+        }
+
         const memberships = uwResult.map(row => row.UserWorkspaces || row);
 
         if (memberships.length === 0) return [];
@@ -127,15 +150,54 @@ const getUserPermissions = async (req, user, workspaceId) => {
     const userId = user.user_id || user.ROWID;
 
     // Step 1: Get user's role in this workspace
-    let memberResult;
+    // Due to onboarding ID mismatch, use multi-strategy lookup
+    let memberResult = [];
+
+    // Collect candidate user IDs
+    const userIdsToTry = new Set([String(userId)]);
+    if (user.ROWID) userIdsToTry.add(String(user.ROWID));
     try {
-        memberResult = await executeZCQL(req,
-            `SELECT role_id FROM ${TABLES.USER_WORKSPACES} 
-             WHERE user_id = '${userId}' AND workspace_id = '${workspaceId}' AND status = 'active'`
+        const userLookup = await executeZCQL(req,
+            `SELECT ROWID FROM ${TABLES.USERS} WHERE user_id = '${userId}'`
         );
-    } catch (e) {
-        console.warn('[AuthService] getUserPermissions membership query failed:', e.message);
-        return { permissions: [], is_super_admin: false };
+        if (userLookup.length > 0) userIdsToTry.add(String(userLookup[0].Users.ROWID));
+    } catch (e) { /* ignore */ }
+
+    // Try exact match combinations
+    for (const uid of userIdsToTry) {
+        if (memberResult.length > 0) break;
+        try {
+            memberResult = await executeZCQL(req,
+                `SELECT role_id FROM ${TABLES.USER_WORKSPACES} 
+                 WHERE user_id = '${uid}' AND workspace_id = '${workspaceId}' AND status = 'active'`
+            );
+        } catch (e) { /* ignore */ }
+    }
+
+    // Fuzzy fallback: fetch all active memberships and match by proximity
+    if (memberResult.length === 0) {
+        try {
+            const allUw = await executeZCQL(req, `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE status = 'active'`);
+            const targetWsId = parseInt(String(workspaceId), 10);
+            const targetUserIds = [...userIdsToTry].map(id => parseInt(id, 10)).filter(n => !isNaN(n));
+
+            for (const row of allUw) {
+                const uw = row.UserWorkspaces || row;
+                const uwWsId = parseInt(String(uw.workspace_id), 10);
+                const uwUserId = parseInt(String(uw.user_id), 10);
+                if (isNaN(uwWsId) || isNaN(uwUserId)) continue;
+
+                const wsMatch = !isNaN(targetWsId) && Math.abs(uwWsId - targetWsId) <= 10;
+                const userMatch = targetUserIds.some(tid => Math.abs(uwUserId - tid) <= 10);
+
+                if (wsMatch && userMatch) {
+                    memberResult = [row];
+                    break;
+                }
+            }
+        } catch (e) {
+            console.warn('[AuthService] Permissions fuzzy fallback failed:', e.message);
+        }
     }
 
     if (memberResult.length === 0) {

@@ -42,11 +42,34 @@ const getMyWorkspaces = async (req) => {
 
     // ── Regular users: fetch memberships using SEPARATE queries ──
     // Step 1: Get user's workspace memberships from UserWorkspaces
+    // UserWorkspaces.user_id stores the Users table ROWID.
     let memberships = [];
     try {
-        const uwResult = await executeZCQL(req,
+        let uwResult = await executeZCQL(req,
             `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${userId}' AND status = 'active'`
         );
+
+        // Fallback: if userId is the custom user_id field (not ROWID),
+        // resolve the actual ROWID and retry.
+        if (uwResult.length === 0) {
+            try {
+                const userLookup = await executeZCQL(req,
+                    `SELECT ROWID FROM ${TABLES.USERS} WHERE user_id = '${userId}'`
+                );
+                if (userLookup.length > 0) {
+                    const actualRowId = userLookup[0].Users.ROWID;
+                    if (String(actualRowId) !== String(userId)) {
+                        console.log(`[WorkspacesService] user_id ${userId} resolved to ROWID ${actualRowId}, retrying`);
+                        uwResult = await executeZCQL(req,
+                            `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${actualRowId}' AND status = 'active'`
+                        );
+                    }
+                }
+            } catch (fallbackErr) {
+                console.warn('[WorkspacesService] Fallback user_id→ROWID lookup failed:', fallbackErr.message);
+            }
+        }
+
         memberships = uwResult.map(row => row.UserWorkspaces || row);
     } catch (err) {
         console.warn('[WorkspacesService] Error fetching user workspace memberships:', err.message);
