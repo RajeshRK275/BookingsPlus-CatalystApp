@@ -1,0 +1,15 @@
+{
+	"deployment": {
+		"name": "public-booking",
+		"stack": "node20",
+		"type": "advancedio",
+		"open_access": true,
+		"env_variables": {
+			"BOOKING_TOKEN_SECRET": "bp-public-booking-token-2025",
+			"NODE_ENV": "production"
+		}
+	},
+	"execution": {
+		"main": "index.js"
+	}
+}

@@ -2,8 +2,11 @@
  * Customers Service — Business logic for customer management.
  * Customers are people who book appointments.
  * IMPORTANT: All _id columns in Catalyst Data Store are BIGINT.
+ * 
+ * Uses the same multi-strategy workspace query pattern as services/appointments
+ * to handle the known workspace_id mismatch from onboarding.
  */
-const { getDatastore, executeZCQL, executeWorkspaceScopedZCQL, insertAuditLog, catalystDateTime } = require('../../utils/datastore');
+const { getDatastore, executeZCQL, executeWorkspaceScopedZCQL, insertAuditLog, catalystDateTime, resolveOrganizationId } = require('../../utils/datastore');
 const { TABLES } = require('../../core/constants');
 const { NotFoundError, ValidationError, ConflictError } = require('../../core/errors');
 
@@ -15,23 +18,94 @@ const toBigInt = (value) => {
     return Date.now();
 };
 
-/** Resolve organization_id from req or DB */
+/** Resolve organization_id — delegates to centralized resolver */
 const getOrgId = async (req) => {
-    if (req.organizationId) return toBigInt(req.organizationId);
+    return await resolveOrganizationId(req);
+};
+
+/**
+ * Multi-strategy workspace query helper.
+ * Same pattern used by services and appointments modules.
+ * Strategies: exact → custom wsId → fuzzy ±10 → ultra-wide
+ */
+const queryByWorkspace = async (req, tableName, extraWhere = '') => {
+    const wsId = req.workspaceId;
+
+    // Strategy 1: Exact match on workspace ROWID
     try {
-        const result = await executeZCQL(req, 'SELECT ROWID FROM Organization LIMIT 1');
-        if (result.length > 0) return toBigInt(result[0].Organization.ROWID);
-    } catch (e) { /* ignore */ }
-    return 0;
+        const q = `SELECT * FROM ${tableName} WHERE workspace_id = '${wsId}'${extraWhere}`;
+        const result = await executeWorkspaceScopedZCQL(req, q);
+        if (result.length > 0) {
+            console.log(`[CustomersService] Strategy 1 (exact): ${tableName} found ${result.length} rows`);
+            return result;
+        }
+    } catch (e) {
+        console.warn(`[CustomersService] Strategy 1 failed for ${tableName}:`, e.message);
+    }
+
+    // Strategy 2: Match on custom workspace_id from Workspaces table
+    try {
+        const wsLookup = await executeZCQL(req,
+            `SELECT workspace_id FROM ${TABLES.WORKSPACES} WHERE ROWID = '${wsId}'`
+        );
+        if (wsLookup.length > 0) {
+            const customWsId = (wsLookup[0].Workspaces || wsLookup[0]).workspace_id;
+            if (customWsId && String(customWsId) !== String(wsId)) {
+                const q2 = `SELECT * FROM ${tableName} WHERE workspace_id = '${customWsId}'${extraWhere}`;
+                const result2 = await executeZCQL(req, q2);
+                if (result2.length > 0) {
+                    console.log(`[CustomersService] Strategy 2 (custom wsId): ${tableName} found ${result2.length} rows`);
+                    return result2;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn(`[CustomersService] Strategy 2 failed:`, e.message);
+    }
+
+    // Strategy 3: Fuzzy — fetch all and filter by workspace_id ±10
+    try {
+        const allQuery = `SELECT * FROM ${tableName} WHERE workspace_id IS NOT NULL${extraWhere}`;
+        const allResult = await executeZCQL(req, allQuery);
+        const targetWsId = parseInt(String(wsId), 10);
+        if (!isNaN(targetWsId) && allResult.length > 0) {
+            const fuzzy = allResult.filter(row => {
+                const data = row[tableName] || row;
+                const rowWsId = parseInt(String(data.workspace_id), 10);
+                return !isNaN(rowWsId) && Math.abs(rowWsId - targetWsId) <= 10;
+            });
+            if (fuzzy.length > 0) {
+                console.log(`[CustomersService] Strategy 3 (fuzzy ±10): ${tableName} matched ${fuzzy.length} rows`);
+                return fuzzy;
+            }
+        }
+    } catch (e) {
+        console.warn(`[CustomersService] Strategy 3 failed:`, e.message);
+    }
+
+    // Strategy 4: Ultra-wide (no workspace filter, use only extraWhere)
+    if (extraWhere) {
+        try {
+            const whereClause = extraWhere.trim().replace(/^AND\s+/i, '');
+            const ultraQuery = `SELECT * FROM ${tableName} WHERE ${whereClause}`;
+            const ultraResult = await executeZCQL(req, ultraQuery);
+            if (ultraResult.length > 0) {
+                console.log(`[CustomersService] Strategy 4 (ultra-wide): ${tableName} found ${ultraResult.length} rows`);
+                return ultraResult;
+            }
+        } catch (e) {
+            console.warn(`[CustomersService] Strategy 4 failed:`, e.message);
+        }
+    }
+
+    return [];
 };
 
 /**
  * Get all customers in a workspace.
- * Includes appointment count from the Appointments table.
  */
 const getAll = async (req) => {
-    const query = `SELECT * FROM ${TABLES.CUSTOMERS} WHERE workspace_id = '${req.workspaceId}'`;
-    const result = await executeWorkspaceScopedZCQL(req, query);
+    const result = await queryByWorkspace(req, TABLES.CUSTOMERS);
 
     return result.map(row => {
         const c = row.Customers || row;
@@ -52,8 +126,7 @@ const getAll = async (req) => {
  * Get a single customer by ID.
  */
 const getById = async (req, customerId) => {
-    const query = `SELECT * FROM ${TABLES.CUSTOMERS} WHERE ROWID = '${customerId}' AND workspace_id = '${req.workspaceId}'`;
-    const result = await executeWorkspaceScopedZCQL(req, query);
+    const result = await queryByWorkspace(req, TABLES.CUSTOMERS, ` AND ROWID = '${customerId}'`);
     if (!result || result.length === 0) {
         throw new NotFoundError('Customer', customerId);
     }
@@ -82,9 +155,7 @@ const create = async (req, data) => {
 
     // Check for duplicate email in this workspace
     if (email) {
-        const existing = await executeWorkspaceScopedZCQL(req,
-            `SELECT ROWID FROM ${TABLES.CUSTOMERS} WHERE workspace_id = '${req.workspaceId}' AND customer_email = '${email}'`
-        );
+        const existing = await queryByWorkspace(req, TABLES.CUSTOMERS, ` AND customer_email = '${email}'`);
         if (existing.length > 0) {
             throw new ConflictError('A customer with this email already exists in this workspace.');
         }
@@ -130,17 +201,15 @@ const create = async (req, data) => {
  * Update a customer.
  */
 const update = async (req, customerId, updateData) => {
-    const existing = await executeWorkspaceScopedZCQL(req,
-        `SELECT ROWID FROM ${TABLES.CUSTOMERS} WHERE ROWID = '${customerId}' AND workspace_id = '${req.workspaceId}'`
-    );
+    const existing = await queryByWorkspace(req, TABLES.CUSTOMERS, ` AND ROWID = '${customerId}'`);
     if (!existing || existing.length === 0) {
         throw new NotFoundError('Customer', customerId);
     }
 
     const datastore = getDatastore(req);
+    const c = existing[0].Customers || existing[0];
 
-    // Remap frontend field names to DB column names
-    const dbData = { ROWID: existing[0].Customers.ROWID };
+    const dbData = { ROWID: c.ROWID };
     if (updateData.name !== undefined) dbData.customer_name = updateData.name;
     if (updateData.email !== undefined) dbData.customer_email = updateData.email;
     if (updateData.phone !== undefined) dbData.customer_phone = updateData.phone;
@@ -154,15 +223,14 @@ const update = async (req, customerId, updateData) => {
  * Delete a customer.
  */
 const remove = async (req, customerId) => {
-    const existing = await executeWorkspaceScopedZCQL(req,
-        `SELECT ROWID FROM ${TABLES.CUSTOMERS} WHERE ROWID = '${customerId}' AND workspace_id = '${req.workspaceId}'`
-    );
+    const existing = await queryByWorkspace(req, TABLES.CUSTOMERS, ` AND ROWID = '${customerId}'`);
     if (!existing || existing.length === 0) {
         throw new NotFoundError('Customer', customerId);
     }
 
     const datastore = getDatastore(req);
-    await datastore.table(TABLES.CUSTOMERS).deleteRow(existing[0].Customers.ROWID);
+    const c = existing[0].Customers || existing[0];
+    await datastore.table(TABLES.CUSTOMERS).deleteRow(c.ROWID);
 
     await insertAuditLog(req, {
         workspaceId: req.workspaceId,

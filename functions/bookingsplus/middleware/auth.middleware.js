@@ -223,30 +223,20 @@ const authMiddleware = async (req, res, next) => {
         }
 
         // ══════════════════════════════════════════════════════════════
-        // SUPER ADMIN AUTO-FIX (only for the first/only user in the system)
-        // This is a blocking check because req.user.is_super_admin is set
-        // based on localUser.is_super_admin right after this block.
-        // The DB update is fire-and-forget to save latency.
+        // SUPER ADMIN AUTO-FIX — DISABLED
+        // 
+        // Previously, this block auto-promoted ANY user to super admin
+        // if they were the only user in the system. This caused a critical bug:
+        // when a staff member logged in (even with multiple users in the system),
+        // race conditions or count query issues could promote them to super admin.
+        // 
+        // The is_super_admin flag is now set ONLY during:
+        //   1. Organization setup (onboarding) — the setup creator gets is_super_admin='true'
+        //   2. Manual admin action
+        // 
+        // The frontend uses WORKSPACE ROLE (from Roles table via UserWorkspaces)
+        // as the PRIMARY source of truth for admin permissions, NOT is_super_admin.
         // ══════════════════════════════════════════════════════════════
-        if (localUser.is_super_admin !== 'true') {
-            try {
-                const allUsersCount = await executeZCQL(req, `SELECT COUNT(ROWID) FROM Users`);
-                const totalUsers = parseInt(
-                    (allUsersCount[0]?.Users?.ROWID || allUsersCount[0]?.Users?.['ROWID.count'] || '0'), 10
-                );
-                if (totalUsers <= 1) {
-                    console.log(`[Auth] Auto-promoting ${catalystEmail} to super_admin (only user in system)`);
-                    localUser.is_super_admin = 'true';
-                    // Fire-and-forget: persist in background, don't block the request
-                    getDatastore(req).table('Users').updateRow({
-                        ROWID: localUser.ROWID,
-                        is_super_admin: 'true',
-                    }).catch(e => console.error('[Auth] Failed to persist super admin flag:', e.message));
-                }
-            } catch (countErr) {
-                console.warn('[Auth] Could not count users for super admin check:', countErr.message);
-            }
-        }
 
         // ── Attach authenticated user + organizationId to request ──
         // NOTE: Removed the UserRoleMapping query — that table doesn't exist

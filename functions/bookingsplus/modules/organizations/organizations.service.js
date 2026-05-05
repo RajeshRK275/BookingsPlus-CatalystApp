@@ -26,57 +26,150 @@ const toBigInt = (value) => {
 };
 
 /**
- * Safe insert helper — tries to insert a row, and on column-name errors,
- * retries with progressively fewer columns. Provides actionable error messages.
+ * Safe insert helper — tries to insert a row with progressive fallback.
+ * 
+ * Strategy:
+ *   1. Try full insert with all columns
+ *   2. If column error → strip optional columns (retryWithout) and retry
+ *   3. If still fails → parse the error to find which column is invalid,
+ *      strip that specific column, and retry
+ *   4. If still fails → try with only the absolute minimum columns
+ * 
+ * Also handles "mandatory column is empty" by checking if the table has
+ * a built-in `name` column that Catalyst requires.
  */
 const safeInsertRow = async (datastore, tableName, rowData, retryWithout = []) => {
+    const table = datastore.table(tableName);
+    const allColumns = Object.keys(rowData);
+    
+    // ── Attempt 1: Full insert ──
     try {
-        return await datastore.table(tableName).insertRow(rowData);
-    } catch (err) {
-        const errMsg = (err.message || '').toLowerCase();
+        return await table.insertRow(rowData);
+    } catch (err1) {
+        const errMsg1 = (err1.message || '');
+        const errLower1 = errMsg1.toLowerCase();
+        console.warn(`[${tableName}] Full insert failed (${allColumns.length} cols): ${errMsg1}`);
+        console.warn(`[${tableName}] Columns sent: ${allColumns.join(', ')}`);
+        
+        // Check if Catalyst is asking for a mandatory 'name' column we didn't provide
+        // Some Catalyst tables have a built-in 'name' column that's mandatory
+        if (errLower1.includes('mandatory') && errLower1.includes('name')) {
+            console.warn(`[${tableName}] Catalyst requires a mandatory 'name' column — adding it`);
+            // Derive a name value from any *_name column in the data
+            const nameValue = rowData.workspace_name || rowData.org_name || rowData.service_name || 
+                              rowData.customer_name || rowData.display_name || rowData.role_name || 
+                              `${tableName}_${Date.now()}`;
+            const withName = { ...rowData, name: nameValue };
+            try {
+                return await table.insertRow(withName);
+            } catch (nameErr) {
+                console.warn(`[${tableName}] Insert with 'name' also failed: ${nameErr.message}`);
+                // Continue to next strategies...
+            }
+        }
 
-        // If there are optional columns to retry without, try stripping them
+        // ── Attempt 2: Strip optional columns ──
         if (retryWithout.length > 0 && (
-            errMsg.includes('invalid input value') || 
-            errMsg.includes('invalid column') ||
-            errMsg.includes('does not exist')
+            errLower1.includes('invalid input value') || 
+            errLower1.includes('invalid column') ||
+            errLower1.includes('does not exist') ||
+            errLower1.includes('column') // Broad catch for any column issue
         )) {
-            console.warn(`[${tableName}] Insert failed, retrying without optional columns: ${retryWithout.join(', ')}. Error: ${err.message}`);
             const reducedData = { ...rowData };
             for (const col of retryWithout) {
                 delete reducedData[col];
             }
+            console.warn(`[${tableName}] Retrying without: ${retryWithout.join(', ')} (${Object.keys(reducedData).length} cols remaining)`);
+            
             try {
-                return await datastore.table(tableName).insertRow(reducedData);
-            } catch (retryErr) {
-                console.error(`[${tableName}] Retry also failed:`, retryErr.message);
-                throw new AppError(
-                    `Table "${tableName}" insert failed even with reduced columns. Error: ${retryErr.message}. Columns attempted: ${Object.keys(reducedData).join(', ')}`,
-                    500,
-                    'DATASTORE_SCHEMA_ERROR'
-                );
+                return await table.insertRow(reducedData);
+            } catch (err2) {
+                const errMsg2 = (err2.message || '');
+                const errLower2 = errMsg2.toLowerCase();
+                console.warn(`[${tableName}] Reduced insert failed: ${errMsg2}`);
+                
+                // Check if Catalyst wants a 'name' column
+                if (errLower2.includes('mandatory') && errLower2.includes('name')) {
+                    const nameValue = rowData.workspace_name || rowData.org_name || rowData.service_name || 
+                                      rowData.customer_name || rowData.display_name || `${tableName}_${Date.now()}`;
+                    try {
+                        return await table.insertRow({ ...reducedData, name: nameValue });
+                    } catch (nameErr2) {
+                        console.warn(`[${tableName}] Reduced + name also failed: ${nameErr2.message}`);
+                    }
+                }
+
+                // ── Attempt 3: Parse error to find the bad column ──
+                // Catalyst errors look like: "Invalid input value for column <column_name>"
+                const badColMatch = errMsg2.match(/invalid input value for column\s+(\w+)/i) ||
+                                    errMsg2.match(/invalid input value for\s+(\w+)/i) ||
+                                    errMsg2.match(/column\s+['"]?(\w+)['"]?\s+does not exist/i);
+                
+                if (badColMatch) {
+                    const badCol = badColMatch[1].toLowerCase();
+                    const furtherReduced = { ...reducedData };
+                    // Remove the identified bad column
+                    for (const key of Object.keys(furtherReduced)) {
+                        if (key.toLowerCase() === badCol) {
+                            delete furtherReduced[key];
+                            console.warn(`[${tableName}] Identified bad column "${key}", removing it`);
+                        }
+                    }
+                    try {
+                        return await table.insertRow(furtherReduced);
+                    } catch (err3) {
+                        console.warn(`[${tableName}] Third attempt also failed: ${err3.message}`);
+                    }
+                }
+
+                // ── Attempt 4: Absolute minimum — only BIGINT-safe ID columns + text columns ──
+                // Try just the _id column + created_at + status
+                const minData = {};
+                for (const [key, val] of Object.entries(rowData)) {
+                    // Keep only ID columns (bigint) and essential text fields
+                    if (key.endsWith('_id') || key === 'status' || key === 'created_at') {
+                        minData[key] = val;
+                    }
+                }
+                // Add a name field for tables that might require it
+                const nameValue = rowData.workspace_name || rowData.org_name || rowData.service_name || 
+                                  rowData.customer_name || rowData.display_name || `${tableName}_${Date.now()}`;
+                minData.name = nameValue;
+                
+                console.warn(`[${tableName}] Final attempt with minimum columns: ${Object.keys(minData).join(', ')}`);
+                try {
+                    return await table.insertRow(minData);
+                } catch (err4) {
+                    // One last try without 'name' in case it doesn't exist either
+                    delete minData.name;
+                    try {
+                        return await table.insertRow(minData);
+                    } catch (err5) {
+                        console.error(`[${tableName}] All insert strategies exhausted. Last error: ${err5.message}`);
+                        throw new AppError(
+                            `Table "${tableName}" insert failed after 5 attempts. ` +
+                            `Last error: ${err5.message}. ` +
+                            `Original columns: ${allColumns.join(', ')}. ` +
+                            `Please verify table columns in the Catalyst Data Store console match exactly: ${allColumns.join(', ')}`,
+                            500,
+                            'DATASTORE_SCHEMA_ERROR'
+                        );
+                    }
+                }
             }
         }
 
-        if (errMsg.includes('invalid input value') || errMsg.includes('invalid column')) {
-            console.error(`[${tableName}] Insert failed — column mismatch. Error: ${err.message}`);
-            console.error(`[${tableName}] Attempted columns & types: ${JSON.stringify(Object.entries(rowData).map(([k,v]) => `${k}=${typeof v}:${v}`))}`);
+        // If not a column error, throw as-is
+        if (errLower1.includes('mandatory') && errLower1.includes('empty')) {
             throw new AppError(
-                `Table "${tableName}" column error: ${err.message}. Columns attempted: ${Object.keys(rowData).join(', ')}. Please verify all columns exist and have correct types in the Catalyst Data Store console.`,
-                500,
-                'DATASTORE_SCHEMA_ERROR'
-            );
-        }
-
-        if (errMsg.includes('mandatory') && errMsg.includes('empty')) {
-            throw new AppError(
-                `Table "${tableName}" has a mandatory column that received an empty value: ${err.message}`,
+                `Table "${tableName}" has a mandatory column that received an empty value: ${errMsg1}. ` +
+                `This usually means a column was set as "Mandatory" in the Catalyst Console but the app didn't provide a value for it.`,
                 500,
                 'DATASTORE_CONFIG_ERROR'
             );
         }
 
-        throw err;
+        throw err1;
     }
 };
 
@@ -202,16 +295,78 @@ const setupOrganization = async (req, { organization_name, org_slug, timezone, c
             owner_user_id: realOwnerUserId,
         }).catch(e => console.warn('Non-critical: org owner update failed:', e.message));
 
-        const wsRow = await safeInsertRow(datastore, TABLES.WORKSPACES, {
+        // ── WORKSPACE INSERT with schema discovery ──
+        // The Workspaces table may have been created manually in the Catalyst Console
+        // with different column names than what the code expects. Common mismatches:
+        //   - 'name' instead of 'workspace_name' (Catalyst default column)
+        //   - Missing 'organization_id' (migration guide didn't include it)
+        //   - Missing 'workspace_slug' (might be named 'slug')
+        //
+        // Strategy: First try with our expected columns. The safeInsertRow helper
+        // will progressively strip columns and try alternatives until it succeeds.
+        //
+        // We also probe the table schema first to adapt column names.
+        let wsActualColumns = null;
+        try {
+            const probe = await executeZCQL(req, `SELECT * FROM ${TABLES.WORKSPACES} LIMIT 1`);
+            if (probe.length > 0) {
+                wsActualColumns = Object.keys(probe[0].Workspaces || {});
+                console.log(`[Setup] Workspaces table columns discovered: ${wsActualColumns.join(', ')}`);
+            }
+        } catch (probeErr) {
+            // Table might be empty — try a different approach: insert and see what sticks
+            console.log(`[Setup] Workspaces table is empty or query failed, using default column names`);
+        }
+        
+        // Build the workspace row data, adapting to actual column names
+        const wsRowData = {
             workspace_id: workspaceId,
-            workspace_name: wsName,
-            workspace_slug: wsSlug,
-            description: `Default workspace for ${organization_name}`,
-            brand_color: DEFAULTS.BRAND_COLOR,
             status: 'active',
             created_by: createdBy,
             created_at: catalystDateTime(),
-        }, ['description', 'brand_color', 'timezone', 'currency', 'logo_url']);
+        };
+        
+        // If we discovered the actual columns, use them; otherwise send both variants
+        const actualColsLower = (wsActualColumns || []).map(c => c.toLowerCase());
+        
+        // workspace_name vs name
+        if (actualColsLower.includes('workspace_name')) {
+            wsRowData.workspace_name = wsName;
+        } else if (actualColsLower.includes('name')) {
+            wsRowData.name = wsName;
+        } else {
+            // Don't know — send both, safeInsertRow will handle the failure
+            wsRowData.workspace_name = wsName;
+        }
+        
+        // workspace_slug vs slug
+        if (actualColsLower.includes('workspace_slug')) {
+            wsRowData.workspace_slug = wsSlug;
+        } else if (actualColsLower.includes('slug')) {
+            wsRowData.slug = wsSlug;
+        } else {
+            wsRowData.workspace_slug = wsSlug;
+        }
+        
+        // organization_id — only include if the column exists
+        if (!wsActualColumns || actualColsLower.includes('organization_id')) {
+            wsRowData.organization_id = toBigInt(orgROWID);
+        }
+        
+        // Optional fields — only include if column exists (or if we don't know)
+        if (!wsActualColumns || actualColsLower.includes('description')) {
+            wsRowData.description = `Default workspace for ${organization_name}`;
+        }
+        if (!wsActualColumns || actualColsLower.includes('brand_color')) {
+            wsRowData.brand_color = DEFAULTS.BRAND_COLOR;
+        }
+        
+        // IMPORTANT: workspace_name and workspace_slug are NOT optional — they are the
+        // core identity of the workspace. Only truly optional/cosmetic columns go here.
+        // Previously workspace_name and workspace_slug were in this list, causing them
+        // to be stripped during retry fallbacks → workspace inserted without its name.
+        const wsOptionalCols = ['description', 'brand_color', 'timezone', 'currency', 'logo_url', 'organization_id'];
+        const wsRow = await safeInsertRow(datastore, TABLES.WORKSPACES, wsRowData, wsOptionalCols);
 
         // ── STEP 4: Seed Roles + UserWorkspace assignment IN PARALLEL ──
         // seedRolesForWorkspace needs to complete first (to get Owner role ID),

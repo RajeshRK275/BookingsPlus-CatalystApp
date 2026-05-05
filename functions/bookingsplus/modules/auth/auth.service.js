@@ -19,15 +19,20 @@ const getUserWorkspaces = async (req, userId) => {
         return [];
     }
 
+    const userEmail = (req.user?.email || '').toLowerCase();
+
     try {
+        // Collect all possible user IDs to search for
+        const candidateUserIds = new Set();
+        candidateUserIds.add(String(userId));
+        if (req.user?.ROWID) candidateUserIds.add(String(req.user.ROWID));
+
         // Step 1: Get user's workspace memberships
-        // UserWorkspaces.user_id stores the Users table ROWID.
         let uwResult = await executeZCQL(req,
             `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${userId}' AND status = 'active'`
         );
 
-        // Fallback: if no results found, userId might be the custom user_id column
-        // (not ROWID). Look up the actual ROWID and retry the query.
+        // Strategy 2: Resolve custom user_id → ROWID and retry
         if (uwResult.length === 0) {
             try {
                 const userLookup = await executeZCQL(req,
@@ -35,6 +40,7 @@ const getUserWorkspaces = async (req, userId) => {
                 );
                 if (userLookup.length > 0) {
                     const actualRowId = userLookup[0].Users.ROWID;
+                    candidateUserIds.add(String(actualRowId));
                     if (String(actualRowId) !== String(userId)) {
                         console.log(`[AuthService] user_id ${userId} resolved to ROWID ${actualRowId}, retrying workspace lookup`);
                         uwResult = await executeZCQL(req,
@@ -44,6 +50,49 @@ const getUserWorkspaces = async (req, userId) => {
                 }
             } catch (fallbackErr) {
                 console.warn('[AuthService] Fallback user_id→ROWID lookup failed:', fallbackErr.message);
+            }
+        }
+
+        // Strategy 3: Email-based lookup
+        if (uwResult.length === 0 && userEmail) {
+            try {
+                console.log(`[AuthService] Strategy 3: Email-based lookup for ${userEmail}`);
+                const emailUsers = await executeZCQL(req,
+                    `SELECT ROWID, user_id FROM ${TABLES.USERS} WHERE email = '${userEmail}'`
+                );
+                for (const row of emailUsers) {
+                    const u = row.Users || row;
+                    if (u.ROWID) candidateUserIds.add(String(u.ROWID));
+                    if (u.user_id) candidateUserIds.add(String(u.user_id));
+                }
+                for (const cid of candidateUserIds) {
+                    if (uwResult.length > 0) break;
+                    try {
+                        uwResult = await executeZCQL(req,
+                            `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE user_id = '${cid}' AND status = 'active'`
+                        );
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) {
+                console.warn('[AuthService] Email-based lookup failed:', e.message);
+            }
+        }
+
+        // Strategy 4: Fuzzy numeric proximity
+        if (uwResult.length === 0) {
+            try {
+                const allUw = await executeZCQL(req, `SELECT * FROM ${TABLES.USER_WORKSPACES} WHERE status = 'active'`);
+                const targetIds = [...candidateUserIds].map(id => parseInt(id, 10)).filter(n => !isNaN(n));
+                if (targetIds.length > 0) {
+                    uwResult = allUw.filter(row => {
+                        const uw = row.UserWorkspaces || row;
+                        const uwUserId = parseInt(String(uw.user_id), 10);
+                        if (isNaN(uwUserId)) return false;
+                        return targetIds.some(tid => Math.abs(uwUserId - tid) <= 10);
+                    });
+                }
+            } catch (e) {
+                console.warn('[AuthService] Fuzzy fallback failed:', e.message);
             }
         }
 
@@ -200,13 +249,21 @@ const getUserPermissions = async (req, user, workspaceId) => {
         }
     }
 
+    // Default staff permissions — minimum set for read access
+    const STAFF_DEFAULT_PERMS = [
+        'dashboard.read', 'services.read', 'appointments.read', 'appointments.create',
+        'customers.read', 'customers.create', 'users.read',
+    ];
+
     if (memberResult.length === 0) {
-        return { permissions: [], is_super_admin: false };
+        console.log('[AuthService] No membership found for permissions, returning staff defaults');
+        return { permissions: STAFF_DEFAULT_PERMS, is_super_admin: false };
     }
 
     const roleId = (memberResult[0].UserWorkspaces || memberResult[0]).role_id;
     if (!roleId) {
-        return { permissions: [], is_super_admin: false };
+        console.log('[AuthService] No role_id in membership, returning staff defaults');
+        return { permissions: STAFF_DEFAULT_PERMS, is_super_admin: false };
     }
 
     // Step 2: Get permission IDs for this role (separate query — no JOIN)

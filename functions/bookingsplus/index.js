@@ -43,7 +43,9 @@ const workspacesRoutes = require('./modules/workspaces/workspaces.routes');
 const usersRoutes = require('./modules/users/users.routes');
 const servicesRoutes = require('./modules/services/services.routes');
 const appointmentsRoutes = require('./modules/appointments/appointments.routes');
+const appointmentsPublicRoutes = require('./modules/appointments/appointments.public.routes');
 const customersRoutes = require('./modules/customers/customers.routes');
+const notificationsRoutes = require('./modules/notifications/notifications.routes');
 // Admin routes (auth + super admin)
 const adminWorkspacesRoutes = require('./modules/admin/admin.workspaces.routes');
 const adminUsersRoutes = require('./modules/admin/admin.users.routes');
@@ -52,10 +54,47 @@ const adminPermissionsRoutes = require('./modules/admin/admin.permissions.routes
 const adminAuditRoutes = require('./modules/admin/admin.audit.routes');
 const adminWebhookRoutes = require('./modules/admin/admin.webhook.routes');
 const adminMigrateRoutes = require('./modules/admin/admin.migrate.routes');
+const adminResetRoutes = require('./modules/admin/admin.reset.routes');
 
 // ═══════════════════════════════════════════════════
 // API V1 Routes
 // ═══════════════════════════════════════════════════
+
+// ── Diagnostic: Check Catalyst datetime timezone behavior ──
+app.get('/api/v1/debug/timezone', authMiddleware, async (req, res) => {
+    try {
+        const zcql = req.catalystApp.zcql();
+        // Read the most recent appointment's start_time
+        const result = await zcql.executeZCQLQuery(
+            `SELECT appointment_id, start_time, end_time, customer_name FROM Appointments ORDER BY ROWID DESC LIMIT 3`
+        );
+        const serverNow = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const serverLocal = `${serverNow.getFullYear()}-${pad(serverNow.getMonth()+1)}-${pad(serverNow.getDate())} ${pad(serverNow.getHours())}:${pad(serverNow.getMinutes())}:${pad(serverNow.getSeconds())}`;
+        
+        return res.json({
+            success: true,
+            debug: {
+                server_now_iso: serverNow.toISOString(),
+                server_now_local: serverLocal,
+                server_tz_offset_minutes: serverNow.getTimezoneOffset(),
+                server_tz_name: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                process_env_tz: process.env.TZ || '(not set)',
+                appointments_from_db: result.map(r => {
+                    const apt = r.Appointments || r;
+                    return {
+                        appointment_id: apt.appointment_id,
+                        customer_name: apt.customer_name,
+                        start_time_raw: apt.start_time,
+                        end_time_raw: apt.end_time,
+                    };
+                }),
+            }
+        });
+    } catch (err) {
+        return res.json({ success: false, error: err.message });
+    }
+});
 
 // Auth — no workspace scope needed (handles /me, /me/permissions)
 app.use('/api/v1/auth', authRoutes);
@@ -66,11 +105,23 @@ app.use('/api/v1/organizations', organizationsRoutes);
 // Workspaces — auth only (list user's workspaces, get workspace details)
 app.use('/api/v1/workspaces', workspacesRoutes);
 
+// Public routes — NO authentication required (for truly unauthenticated access)
+app.use('/api/v1/public/appointments', appointmentsPublicRoutes);
+
+// ── Public-facing booking routes ──
+// These require Catalyst platform auth (mandatory for Advanced I/O functions)
+// but do NOT require workspace context or workspace-level permissions.
+// They resolve workspace/org context from the service_id itself.
+// Mounted BEFORE workspace-scoped routes so they match first.
+app.use('/api/v1/booking', authMiddleware, require('./modules/appointments/appointments.booking.routes'));
+app.use('/api/v1/booking/services', authMiddleware, require('./modules/services/services.public.routes'));
+
 // Workspace-scoped routes — auth + workspace middleware
 app.use('/api/v1/users', authMiddleware, workspaceMiddleware, usersRoutes);
 app.use('/api/v1/services', authMiddleware, workspaceMiddleware, servicesRoutes);
 app.use('/api/v1/appointments', authMiddleware, workspaceMiddleware, appointmentsRoutes);
 app.use('/api/v1/customers', authMiddleware, workspaceMiddleware, customersRoutes);
+app.use('/api/v1/notifications', authMiddleware, workspaceMiddleware, notificationsRoutes);
 
 // Admin routes — auth + super admin guard
 app.use('/api/v1/admin/workspaces', authMiddleware, superAdminGuard, adminWorkspacesRoutes);
@@ -84,6 +135,7 @@ app.use('/api/v1/admin/webhook', adminWebhookRoutes);
 
 // Admin migration tool — protected by X-Admin-Secret header (same auth as webhook)
 app.use('/api/v1/admin/migrate-datastore', webhookAuth, adminMigrateRoutes);
+app.use('/api/v1/admin/reset', authMiddleware, superAdminGuard, adminResetRoutes);
 
 // ── Centralized Error Handler ──
 const { AppError } = require('./core/errors');

@@ -10,8 +10,20 @@ router.use(authMiddleware);
 
 /** GET /my-workspaces — User's workspaces for sidebar switcher */
 router.get('/my-workspaces', asyncHandler(async (req, res) => {
-    const workspaces = await workspacesService.getMyWorkspaces(req);
-    return response.success(res, workspaces);
+    let workspaces = await workspacesService.getMyWorkspaces(req);
+    // Auto-repair workspaces that were created without a name (bug fix for initial setup)
+    if (workspaces.some(ws => ws._needsNameRepair)) {
+        workspaces = await workspacesService.autoRepairWorkspaceNames(req, workspaces);
+    }
+    // Strip internal repair flags before sending to client
+    const cleaned = workspaces.map(({ _rawROWID, _needsNameRepair, ...ws }) => ws);
+    return response.success(res, cleaned);
+}));
+
+/** PUT /:id — Update workspace details (admin/owner only) */
+router.put('/:id', asyncHandler(async (req, res) => {
+    const updated = await workspacesService.updateWorkspace(req, req.params.id, req.body);
+    return response.success(res, updated, 'Workspace updated successfully.');
 }));
 
 /** GET /:id — Workspace details by ID */

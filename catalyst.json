@@ -1,7 +1,8 @@
 {
   "functions": {
     "targets": [
-      "bookingsplus"
+      "bookingsplus",
+      "public-booking"
     ],
     "ignore": [],
     "source": "functions"

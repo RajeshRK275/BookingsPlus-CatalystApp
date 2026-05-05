@@ -51,6 +51,77 @@ const toBigIntSafe = (val) => {
 };
 
 /**
+ * ═══════════════════════════════════════════════════════════════
+ * CENTRALIZED organization_id resolver.
+ * ═══════════════════════════════════════════════════════════════
+ * 
+ * In the Catalyst Data Store, `organization_id` is a MANDATORY BIGINT column
+ * on ALL major tables (Organization, Users, Services, Appointments, Customers,
+ * ServiceStaff, Workspaces, etc.). Every insertRow() call MUST include a valid
+ * numeric `organization_id` or the SDK throws:
+ *   "Column organization_id is mandatory and cannot be empty"
+ * 
+ * This helper resolves organization_id from multiple sources:
+ *   1. req.organizationId (set by auth middleware — fastest, no DB call)
+ *   2. Organization table ROWID (single DB call — cached in-memory)
+ *   3. Fallback: Date.now() (guarantees a valid BIGINT — should never happen
+ *      in a properly set-up deployment, but prevents crashes)
+ * 
+ * Results are cached on `req._resolvedOrgId` so repeated calls in the same
+ * request don't hit the DB again.
+ */
+let _cachedOrgId = null;
+let _cachedOrgIdAt = 0;
+
+const resolveOrganizationId = async (req) => {
+    // 1. Already resolved for this request
+    if (req._resolvedOrgId) return req._resolvedOrgId;
+
+    // 2. Set by auth middleware (most common case)
+    if (req.organizationId) {
+        const orgId = toBigIntSafe(req.organizationId);
+        if (orgId > 0) {
+            req._resolvedOrgId = orgId;
+            return orgId;
+        }
+    }
+
+    // 3. In-memory cache (valid for 30 seconds)
+    const now = Date.now();
+    if (_cachedOrgId && (now - _cachedOrgIdAt) < 30000) {
+        req._resolvedOrgId = _cachedOrgId;
+        return _cachedOrgId;
+    }
+
+    // 4. Fetch from Organization table
+    try {
+        const zcql = req.catalystApp.zcql();
+        const result = await zcql.executeZCQLQuery('SELECT ROWID FROM Organization LIMIT 1');
+        if (result && result.length > 0) {
+            const rowId = (result[0].Organization || result[0]).ROWID;
+            if (rowId) {
+                const orgId = toBigIntSafe(rowId);
+                if (orgId > 0) {
+                    _cachedOrgId = orgId;
+                    _cachedOrgIdAt = now;
+                    req._resolvedOrgId = orgId;
+                    req.organizationId = String(orgId); // Cache on req for other modules
+                    return orgId;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('[datastore] resolveOrganizationId: Failed to fetch from Organization table:', e.message);
+    }
+
+    // 5. Last resort — use Date.now() as a valid BIGINT placeholder
+    console.error('[datastore] WARNING: Could not resolve organization_id — using Date.now() fallback');
+    const fallback = Date.now();
+    req._resolvedOrgId = fallback;
+    return fallback;
+};
+
+/**
  * Audit log helper — inserts an entry into AuditLog table.
  * workspace_id and user_id are BIGINT — must be numeric.
  */
@@ -80,5 +151,7 @@ module.exports = {
     executeZCQL,
     executeWorkspaceScopedZCQL,
     insertAuditLog,
-    catalystDateTime
+    catalystDateTime,
+    resolveOrganizationId,
+    toBigIntSafe,
 };

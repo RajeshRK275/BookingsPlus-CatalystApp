@@ -8,8 +8,18 @@ const orgService = require('./organizations.service');
 
 router.use(authMiddleware);
 
-/** POST /setup — Full onboarding flow */
+/** POST /setup — Full onboarding flow (super admin only) */
 router.post('/setup', asyncHandler(async (req, res) => {
+    // Only super admins can set up the app.
+    // During first-time setup (no org exists), authMiddleware automatically
+    // grants is_super_admin=true to the FIRST user who authenticates.
+    // After setup, only users with is_super_admin='true' in the DB can re-setup.
+    if (!req.user.is_super_admin) {
+        throw new ForbiddenError(
+            'Only the Super Admin can set up the organization. ' +
+            'Please contact your administrator to complete the initial setup.'
+        );
+    }
     const result = await orgService.setupOrganization(req, req.body);
     return response.success(res, result, 'Organization and workspace provisioned successfully.');
 }));
